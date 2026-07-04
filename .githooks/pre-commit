@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -e
+
+# Format staged TypeScript/TSX files with Prettier before committing.
+staged=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' || true)
+if [ -n "$staged" ]; then
+  npx prettier --write $staged
+  git add $staged
+fi

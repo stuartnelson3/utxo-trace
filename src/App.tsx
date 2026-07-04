@@ -1,0 +1,691 @@
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useReactToPrint } from 'react-to-print';
+import UTXONode from './components/UTXONode';
+import BasisReport from './components/BasisReport';
+import { UTXONode as UTXONodeType } from './types';
+import { fetchNodeData, fetchChildNodes, fetchRawBtcUsd, fetchUsdToEurRate } from './api';
+import { collectLeaves, sumBasis, updateNode, findNode, nodePrice } from './utils';
+import { formatCurrency, APP_CONFIG, DisplayCurrency } from './config';
+import { TraceContext } from './TraceContext';
+import {
+  detectCsvType,
+  parseKrakenLedger,
+  parseKrakenTrades,
+  buildAttributions,
+  fillMissingPrices,
+  findMatchingWithdrawal,
+  KrakenWithdrawalAttribution,
+} from './kraken';
+import {
+  detectSwanCsvType,
+  parseSwanTrades,
+  parseSwanTransfers,
+  parseSwanWithdrawals,
+  buildSwanAttributions,
+  SwanWithdrawalAttribution,
+  SwanLot,
+} from './swan';
+
+const App: React.FC = () => {
+  const [rootNode, setRootNode] = useState<UTXONodeType | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    const p = new URLSearchParams(window.location.search);
+    const e = p.get('expanded');
+    return e ? new Set(e.split(',').filter(Boolean)) : new Set();
+  });
+  const [searchTxid, setSearchTxid] = useState('');
+  const [selectedVout, setSelectedVout] = useState<number | null>(null);
+  const [pendingOutputs, setPendingOutputs] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>(APP_CONFIG.CURRENCY);
+  const reportRef = useRef<HTMLDivElement>(null);
+  const pendingAutoExpand = useRef<string[]>([]);
+  const csvFileRef = useRef<HTMLInputElement>(null);
+  const disposalPriceRef = useRef<HTMLInputElement>(null);
+
+  // Kraken state — explicit user matching (amount-based, so must be user-confirmed)
+  const [krakenAttributions, setKrakenAttributions] = useState<Map<
+    string,
+    KrakenWithdrawalAttribution
+  > | null>(null);
+  // Map: nodeId → withdrawal ledger txid (user-confirmed match)
+  const [krakenMatches, setKrakenMatches] = useState<Map<string, string>>(new Map());
+
+  // Swan state — automatic matching via Bitcoin txid (exact, no ambiguity)
+  const [swanAttributions, setSwanAttributions] = useState<Map<
+    string,
+    SwanWithdrawalAttribution
+  > | null>(null);
+  const [swanWarnings, setSwanWarnings] = useState<string[]>([]);
+
+  const [csvLoading, setCsvLoading] = useState(false);
+  // What was detected per exchange — shown as compact type summaries, not filenames.
+  const [krakenSummary, setKrakenSummary] = useState<string | null>(null);
+  const [swanSummary, setSwanSummary] = useState<string | null>(null);
+
+  // Actual disposal date + price (user-entered). When set, drives real gain/loss instead of hypothetical.
+  const [disposalDate, setDisposalDate] = useState('');
+  const [disposalPriceStr, setDisposalPriceStr] = useState('');
+
+  const handlePrint = useReactToPrint({
+    contentRef: reportRef,
+    documentTitle: `BTC-Audit-${searchTxid.substring(0, 8)}`,
+  });
+
+  const handleInitialFetch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchTxid) return;
+    setRootNode(null);
+    setExpandedIds(new Set());
+    setSelectedVout(null);
+    try {
+      const res = await fetch(`https://mempool.space/api/tx/${searchTxid}`);
+      const txData = await res.json();
+      setPendingOutputs(txData.vout);
+    } catch {
+      alert('Transaction not found. Check the TXID and try again.');
+    }
+  };
+
+  const startTrace = async (voutIndex: number) => {
+    setSelectedVout(voutIndex);
+    setRootNode(null);
+    setExpandedIds(new Set());
+    setPendingOutputs(null);
+    setDisposalDate('');
+    setDisposalPriceStr('');
+    setLoading(true);
+    try {
+      const data = await fetchNodeData(searchTxid, voutIndex);
+      setRootNode(data);
+    } catch (err) {
+      console.error('Trace failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExpand = async (nodeId: string) => {
+    if (!rootNode) return;
+    const node = findNode(rootNode, nodeId);
+    if (!node) return;
+    if (node.children.length > 0) {
+      setExpandedIds((prev) => new Set([...prev, nodeId]));
+      return;
+    }
+    setLoading(true);
+    try {
+      const children = await fetchChildNodes(node.txid);
+      setRootNode((prev) => (prev ? updateNode(prev, nodeId, (n) => ({ ...n, children })) : null));
+      setExpandedIds((prev) => new Set([...prev, nodeId]));
+    } catch (err) {
+      console.error('Expand failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCollapse = (nodeId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(nodeId);
+      return next;
+    });
+  };
+
+  const handleRemoveBranch = (nodeId: string) => {
+    setRootNode((prev) =>
+      prev ? updateNode(prev, nodeId, (n) => ({ ...n, children: [] })) : null
+    );
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(nodeId);
+      return next;
+    });
+  };
+
+  const handleNodeUpdate = (nodeId: string, patch: Partial<UTXONodeType>) => {
+    setRootNode((prev) => (prev ? updateNode(prev, nodeId, (n) => ({ ...n, ...patch })) : null));
+  };
+
+  // Explicit Kraken matching (user-triggered): find by amount, record nodeId → withdrawalTxid.
+  // Returns true if a match was found, false otherwise (so UTXONode can show feedback).
+  const handleMatchKraken = (nodeId: string, amountSats: number): boolean => {
+    if (!krakenAttributions) return false;
+    const found = findMatchingWithdrawal(krakenAttributions, amountSats);
+    if (found) {
+      setKrakenMatches((prev) => new Map([...prev, [nodeId, found.ledgerTxid]]));
+      return true;
+    }
+    return false;
+  };
+
+  const handleRemoveKraken = (nodeId: string) => {
+    setKrakenMatches((prev) => {
+      const next = new Map(prev);
+      next.delete(nodeId);
+      return next;
+    });
+  };
+
+  // Unified CSV loader — auto-detects Kraken ledger/trades and Swan trades/transfers/withdrawals.
+  // All exchange files can be loaded in one shot.
+  const handleCsvFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setCsvLoading(true);
+
+    let krakenLedgerText = '';
+    let krakenTradesText = '';
+    let swanTradesText = '';
+    let swanTransfersText = '';
+    let swanWithdrawalsText = '';
+    const names: string[] = [];
+
+    for (const file of Array.from(files)) {
+      const text = await file.text();
+      const krakenType = detectCsvType(text);
+      const swanType = detectSwanCsvType(text);
+      if (krakenType === 'ledger') {
+        krakenLedgerText = text;
+        names.push(file.name);
+      } else if (krakenType === 'trades') {
+        krakenTradesText = text;
+        names.push(file.name);
+      } else if (swanType === 'swan-trades') {
+        swanTradesText = text;
+        names.push(file.name);
+      } else if (swanType === 'swan-transfers') {
+        swanTransfersText = text;
+        names.push(file.name);
+      } else if (swanType === 'swan-withdrawals') {
+        swanWithdrawalsText = text;
+        names.push(file.name);
+      }
+    }
+
+    const warnings: string[] = [];
+
+    // --- Kraken ---
+    if (krakenLedgerText) {
+      try {
+        const ledger = parseKrakenLedger(krakenLedgerText);
+        const trades = krakenTradesText ? parseKrakenTrades(krakenTradesText) : new Map();
+        const raw = buildAttributions(ledger, trades);
+        const filled = await fillMissingPrices(raw, fetchRawBtcUsd, fetchUsdToEurRate);
+        setKrakenAttributions(filled);
+        setKrakenMatches(new Map()); // clear stale matches when CSV reloaded
+        setKrakenSummary(krakenTradesText ? 'ledger + trades' : 'ledger');
+      } catch (err) {
+        console.error('Kraken CSV error:', err);
+        warnings.push('failed to parse Kraken CSV — check file format');
+      }
+    }
+
+    // --- Swan ---
+    let swanLots: SwanLot[] = [];
+    let swanLotSource = '';
+    if (swanTransfersText && swanTradesText) {
+      warnings.push('both trades and transfers detected (redundant): using transfers');
+    }
+    if (swanTransfersText) {
+      swanLots = parseSwanTransfers(swanTransfersText);
+      swanLotSource = 'transfers';
+    } else if (swanTradesText) {
+      swanLots = parseSwanTrades(swanTradesText);
+      swanLotSource = 'trades';
+    }
+    const hasSwanLots = swanLots.length > 0;
+    const hasSwanWithdrawals = !!swanWithdrawalsText;
+
+    if (hasSwanLots && !hasSwanWithdrawals) {
+      warnings.push(`swan ${swanLotSource} detected — withdrawals CSV also required`);
+    }
+    if (!hasSwanLots && hasSwanWithdrawals) {
+      warnings.push('swan withdrawals detected — trades or transfers CSV also required');
+    }
+    if (hasSwanLots && hasSwanWithdrawals) {
+      try {
+        const withdrawals = parseSwanWithdrawals(swanWithdrawalsText);
+        setSwanAttributions(buildSwanAttributions(swanLots, withdrawals));
+        setSwanSummary(`${swanLotSource} + withdrawals`);
+      } catch (err) {
+        console.error('Swan CSV error:', err);
+        warnings.push('failed to parse Swan CSV — check file format');
+      }
+    }
+
+    setSwanWarnings(warnings);
+    setCsvLoading(false);
+  };
+
+  // Restore state from URL on mount
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const urlTxid = p.get('txid');
+    const urlVout = p.get('vout');
+    const urlExpanded = p.get('expanded');
+    if (!urlTxid || urlVout === null) return;
+    const vout = parseInt(urlVout, 10);
+    if (isNaN(vout)) return;
+    setSearchTxid(urlTxid);
+    setSelectedVout(vout);
+    setLoading(true);
+    fetchNodeData(urlTxid, vout)
+      .then((data) => {
+        setRootNode(data);
+        if (urlExpanded) pendingAutoExpand.current = urlExpanded.split(',').filter(Boolean);
+      })
+      .catch((err) => console.error('URL restore failed:', err))
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync URL whenever trace state changes
+  useEffect(() => {
+    if (!rootNode || selectedVout === null) return;
+    const parts = [`txid=${searchTxid}`, `vout=${selectedVout}`];
+    if (expandedIds.size > 0) parts.push(`expanded=${[...expandedIds].join(',')}`);
+    history.replaceState(null, '', `?${parts.join('&')}`);
+  }, [rootNode, searchTxid, selectedVout, expandedIds]);
+
+  // Auto-expand nodes restored from URL, one at a time top-down
+  useEffect(() => {
+    if (!rootNode || pendingAutoExpand.current.length === 0) return;
+    pendingAutoExpand.current = pendingAutoExpand.current.filter((id) => {
+      const n = findNode(rootNode, id);
+      return n === null || n.children.length === 0;
+    });
+    const nextId = pendingAutoExpand.current.find((id) => findNode(rootNode, id) !== null);
+    if (!nextId) return;
+    pendingAutoExpand.current = pendingAutoExpand.current.filter((id) => id !== nextId);
+    handleExpand(nextId);
+  }, [rootNode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const leaves = useMemo(
+    () => (rootNode ? collectLeaves(rootNode, expandedIds) : []),
+    [rootNode, expandedIds]
+  );
+
+  // Attach basisOverride to leaves.
+  // Swan: automatic (txid exact match, unambiguous).
+  // Kraken: only for nodes explicitly matched by the user (amount-based, could be ambiguous).
+  const leavesWithAttribution = useMemo(() => {
+    if (!krakenAttributions && !swanAttributions) return leaves;
+    return leaves.map((leaf) => {
+      if (swanAttributions) {
+        const attr = swanAttributions.get(leaf.node.txid);
+        if (attr) return { ...leaf, basisOverride: { usd: attr.totalBasisUsd } };
+      }
+      if (krakenAttributions && krakenMatches.size > 0) {
+        const withdrawalTxid = krakenMatches.get(leaf.node.id);
+        if (withdrawalTxid) {
+          const attr = krakenAttributions.get(withdrawalTxid);
+          if (attr) {
+            const basisEur = attr.lots.reduce((s, l) => s + (l.basisEur ?? 0), 0);
+            return {
+              ...leaf,
+              basisOverride: { usd: basisEur / (leaf.node.usdToEur || 1), eur: basisEur },
+            };
+          }
+        }
+      }
+      return leaf;
+    });
+  }, [leaves, krakenAttributions, krakenMatches, swanAttributions]);
+
+  const totalBasis = useMemo(
+    () => sumBasis(leavesWithAttribution, displayCurrency),
+    [leavesWithAttribution, displayCurrency]
+  );
+
+  const disposalTimestamp = disposalDate
+    ? Math.floor(new Date(disposalDate).getTime() / 1000)
+    : Math.floor(Date.now() / 1000);
+  const disposalPriceNum = disposalPriceStr ? parseFloat(disposalPriceStr) : null;
+
+  const rootPrice = rootNode ? nodePrice(rootNode, displayCurrency) : 0;
+  const proceeds = rootNode ? (rootNode.amountSats / 1e8) * (disposalPriceNum ?? rootPrice) : 0;
+  const gainLoss = proceeds - totalBasis;
+
+  const hasAnyAttribution = krakenAttributions !== null || swanAttributions !== null;
+
+  const traceContext = useMemo(
+    () => ({
+      displayCurrency,
+      disposalTimestamp,
+      disposalDate: disposalDate || null,
+      disposalPriceDisplay: disposalPriceNum,
+      krakenAttributions: krakenAttributions ?? new Map(),
+      krakenMatches,
+      swanAttributions: swanAttributions ?? new Map(),
+    }),
+    [
+      displayCurrency,
+      disposalTimestamp,
+      disposalDate,
+      disposalPriceNum,
+      krakenAttributions,
+      krakenMatches,
+      swanAttributions,
+    ]
+  );
+
+  return (
+    <div style={{ maxWidth: 960, margin: '40px auto', padding: '0 20px' }}>
+      {/* Header */}
+      <header style={{ marginBottom: 32 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <h1 style={{ margin: 0, fontSize: 14, fontWeight: 'bold', letterSpacing: 0 }}>
+            utxo trace
+          </h1>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+            {/* Unified CSV upload */}
+            <input
+              ref={csvFileRef}
+              type="file"
+              accept=".csv"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => handleCsvFiles(e.target.files)}
+            />
+            <button
+              onClick={() => csvFileRef.current?.click()}
+              disabled={csvLoading}
+              style={{
+                font: '14px/1.7 monospace',
+                border: '1px solid var(--border)',
+                padding: '0 8px',
+                cursor: 'pointer',
+                background: hasAnyAttribution ? 'var(--fg)' : 'var(--bg)',
+                color: hasAnyAttribution ? 'var(--bg)' : 'var(--fg)',
+              }}
+            >
+              {csvLoading ? 'loading...' : hasAnyAttribution ? '[csv ✓]' : '[load exchange csv]'}
+            </button>
+            {(krakenSummary || swanSummary) && !csvLoading && (
+              <span style={{ color: 'var(--muted)', fontSize: 11 }}>
+                {[
+                  krakenSummary && `kraken: ${krakenSummary}`,
+                  swanSummary && `swan: ${swanSummary}`,
+                ]
+                  .filter(Boolean)
+                  .join('  ·  ')}
+              </span>
+            )}
+
+            {/* Currency toggle */}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {(['USD', 'EUR'] as DisplayCurrency[]).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setDisplayCurrency(c)}
+                  style={{
+                    font: '14px/1.7 monospace',
+                    border: '1px solid var(--border)',
+                    padding: '0 8px',
+                    cursor: 'pointer',
+                    background: displayCurrency === c ? 'var(--fg)' : 'var(--bg)',
+                    color: displayCurrency === c ? 'var(--bg)' : 'var(--fg)',
+                  }}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <hr
+          style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '8px 0 12px' }}
+        />
+        <form onSubmit={handleInitialFetch} style={{ display: 'flex', gap: 8 }}>
+          <input
+            type="text"
+            placeholder="paste transaction id..."
+            value={searchTxid}
+            onChange={(e) => setSearchTxid(e.target.value)}
+            style={{
+              flex: 1,
+              font: '14px/1.7 monospace',
+              border: '1px solid var(--border)',
+              background: 'var(--bg)',
+              color: 'var(--fg)',
+              padding: '2px 8px',
+              outline: 'none',
+            }}
+          />
+          <button
+            type="submit"
+            style={{
+              font: '14px/1.7 monospace',
+              border: '1px solid var(--border)',
+              background: 'var(--bg)',
+              color: 'var(--fg)',
+              padding: '2px 12px',
+              cursor: 'pointer',
+            }}
+          >
+            {loading ? 'loading...' : '[trace]'}
+          </button>
+        </form>
+
+        {/* Warnings */}
+        {swanWarnings.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            {swanWarnings.map((w, i) => (
+              <div key={i} style={{ color: 'var(--taxable)', fontSize: 12 }}>
+                ⚠ {w}
+              </div>
+            ))}
+          </div>
+        )}
+      </header>
+
+      {/* Output selector */}
+      {pendingOutputs && (
+        <div style={{ marginBottom: 32 }}>
+          <p
+            style={{
+              margin: '0 0 8px',
+              color: 'var(--muted)',
+              textTransform: 'uppercase',
+              letterSpacing: 1,
+              fontSize: 11,
+            }}
+          >
+            select output for audit
+          </p>
+          {pendingOutputs.map((output, index) => (
+            <div key={index} style={{ marginBottom: 4 }}>
+              <button
+                onClick={() => startTrace(index)}
+                style={{
+                  font: '14px/1.7 monospace',
+                  border: 'none',
+                  background: 'none',
+                  color: 'var(--link)',
+                  cursor: 'pointer',
+                  padding: 0,
+                  textDecoration: 'underline',
+                }}
+              >
+                OUTPUT #{index}
+              </button>
+              <span style={{ color: 'var(--muted)', marginLeft: 8 }}>
+                {(output.value / 1e8).toFixed(8)} BTC
+              </span>
+              {output.scriptpubkey_address && (
+                <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
+                  → {output.scriptpubkey_address}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Main trace view */}
+      {rootNode && (
+        <TraceContext.Provider value={traceContext}>
+          <>
+            {/* Summary bar */}
+            <div style={{ marginBottom: 24 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 32,
+                  flexWrap: 'wrap',
+                  alignItems: 'baseline',
+                  marginBottom: 8,
+                }}
+              >
+                <div>
+                  <span style={{ color: 'var(--muted)' }}>basis: </span>
+                  <strong>{formatCurrency(totalBasis, displayCurrency)}</strong>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--muted)' }}>
+                    {gainLoss >= 0 ? 'gain: ' : 'loss: '}
+                  </span>
+                  <strong>
+                    {gainLoss >= 0 ? '▲' : '▼'}{' '}
+                    {formatCurrency(Math.abs(gainLoss), displayCurrency)}
+                  </strong>
+                  {!disposalPriceNum && (
+                    <span style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 4 }}>
+                      (est)
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => handlePrint()}
+                  style={{
+                    font: '14px/1.7 monospace',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg)',
+                    color: 'var(--fg)',
+                    padding: '0 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  [export pdf]
+                </button>
+              </div>
+
+              {/* Disposal date + price — converts gain from hypothetical to actual */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--muted)', fontSize: 12 }}>disposed:</span>
+                <input
+                  type="date"
+                  value={disposalDate}
+                  onChange={(e) => setDisposalDate(e.target.value)}
+                  onBlur={(e) => {
+                    if (e.target.value) disposalPriceRef.current?.focus();
+                  }}
+                  style={{
+                    font: '13px/1.5 monospace',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg)',
+                    color: disposalDate ? 'var(--fg)' : 'var(--muted)',
+                    padding: '1px 4px',
+                  }}
+                />
+                <span style={{ color: 'var(--muted)', fontSize: 12 }}>@</span>
+                <input
+                  ref={disposalPriceRef}
+                  type="number"
+                  value={disposalPriceStr}
+                  onChange={(e) => setDisposalPriceStr(e.target.value)}
+                  placeholder={`${displayCurrency}/BTC`}
+                  style={{
+                    font: '13px/1.5 monospace',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg)',
+                    color: 'var(--fg)',
+                    padding: '1px 4px',
+                    width: 140,
+                  }}
+                />
+                {(disposalDate || disposalPriceStr) && (
+                  <button
+                    onClick={() => {
+                      setDisposalDate('');
+                      setDisposalPriceStr('');
+                    }}
+                    style={{
+                      font: '13px/1.5 monospace',
+                      border: 'none',
+                      background: 'none',
+                      color: 'var(--muted)',
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    [×]
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <UTXONode
+              node={rootNode}
+              expandedIds={expandedIds}
+              onExpand={handleExpand}
+              onCollapse={handleCollapse}
+              onRemoveBranch={handleRemoveBranch}
+              onNodeUpdate={handleNodeUpdate}
+              onMatchKraken={handleMatchKraken}
+              onRemoveKraken={handleRemoveKraken}
+            />
+          </>
+        </TraceContext.Provider>
+      )}
+
+      {/* Footer disclaimer */}
+      <footer
+        style={{
+          marginTop: 48,
+          borderTop: '1px solid var(--border)',
+          paddingTop: 12,
+          color: 'var(--muted)',
+          fontSize: 12,
+        }}
+      >
+        not financial or tax advice. blockchain prices from{' '}
+        <a href="https://mempool.space" target="_blank">
+          mempool.space
+        </a>{' '}
+        and the ecb via{' '}
+        <a href="https://frankfurter.dev" target="_blank">
+          frankfurter.dev
+        </a>
+        . exchange cost basis from kraken (ledger + trades csvs) or swan bitcoin (transfers or
+        trades + withdrawals csvs; transfers preferred when both are loaded). verify with a tax
+        professional before filing.
+      </footer>
+
+      {/* Hidden print target */}
+      <div style={{ display: 'none' }}>
+        {rootNode && (
+          <TraceContext.Provider value={traceContext}>
+            <BasisReport
+              ref={reportRef}
+              rootNode={rootNode}
+              totalBasis={totalBasis}
+              leaves={leavesWithAttribution}
+              expandedIds={expandedIds}
+            />
+          </TraceContext.Provider>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default App;
