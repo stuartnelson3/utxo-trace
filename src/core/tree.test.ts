@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { collectLeaves, updateNode, findNode, sumBasis, leafBasis, ScaledLeaf } from './tree';
+import {
+  collectLeaves,
+  collectExcluded,
+  updateNode,
+  findNode,
+  sumBasis,
+  leafBasis,
+  ScaledLeaf,
+} from './tree';
 import { UTXONode } from './types';
 
 // Bounded-depth arbitrary tree. Children are NOT required to sum to the
@@ -54,6 +62,111 @@ describe('collectLeaves', () => {
         expect(leaves[0].scaledSats).toBe(root.amountSats);
       })
     );
+  });
+});
+
+describe('collectExcluded / prune conservation', () => {
+  it('attributed + excluded === traced total, for any subset of pruned nodes', () => {
+    fc.assert(
+      fc.property(
+        arbNode(3),
+        fc.array(fc.boolean(), { minLength: 0, maxLength: 40 }),
+        (root, flags) => {
+          const expanded = new Set(allIds(root));
+          const ids = allIds(root);
+          // Prune a pseudo-random subset (any id whose position flag is true).
+          const prunedIds = new Set(
+            flags.length === 0 ? [] : ids.filter((_, i) => flags[i % flags.length])
+          );
+
+          const attributed = collectLeaves(root, expanded, prunedIds).reduce(
+            (s, l) => s + l.scaledSats,
+            0
+          );
+          const excluded = collectExcluded(root, expanded, prunedIds).reduce(
+            (s, l) => s + l.scaledSats,
+            0
+          );
+          const tolerance = Math.max(1, root.amountSats * 1e-9);
+          expect(Math.abs(attributed + excluded - root.amountSats)).toBeLessThan(tolerance);
+        }
+      )
+    );
+  });
+
+  it('prune/restore round trip: excluding then un-excluding a node returns to the original total', () => {
+    fc.assert(
+      fc.property(arbNode(3), (root) => {
+        const expanded = new Set(allIds(root));
+        const ids = allIds(root);
+        const targetId = ids[ids.length - 1];
+
+        const before = collectLeaves(root, expanded).reduce((s, l) => s + l.scaledSats, 0);
+
+        // "prune"
+        const pruned = new Set([targetId]);
+        const duringAttributed = collectLeaves(root, expanded, pruned).reduce(
+          (s, l) => s + l.scaledSats,
+          0
+        );
+        const duringExcluded = collectExcluded(root, expanded, pruned).reduce(
+          (s, l) => s + l.scaledSats,
+          0
+        );
+        const tolerance = Math.max(1, root.amountSats * 1e-9);
+        expect(Math.abs(duringAttributed + duringExcluded - root.amountSats)).toBeLessThan(
+          tolerance
+        );
+
+        // "restore" (empty prune set again)
+        const after = collectLeaves(root, expanded, new Set()).reduce(
+          (s, l) => s + l.scaledSats,
+          0
+        );
+        expect(after).toBeCloseTo(before, 6);
+      })
+    );
+  });
+
+  it('a pruned node with children excludes the whole subtree, not just itself', () => {
+    const leaf: UTXONode = {
+      id: 'leaf',
+      txid: 't-leaf',
+      vout: 0,
+      amountSats: 100,
+      timestamp: 0,
+      priceBtcUsd: 0,
+      usdToEur: 1,
+      isOverride: false,
+      children: [],
+    };
+    const branch: UTXONode = {
+      id: 'branch',
+      txid: 't-branch',
+      vout: 0,
+      amountSats: 100,
+      timestamp: 0,
+      priceBtcUsd: 0,
+      usdToEur: 1,
+      isOverride: false,
+      children: [leaf],
+    };
+    const root: UTXONode = {
+      id: 'root',
+      txid: 't-root',
+      vout: 0,
+      amountSats: 100,
+      timestamp: 0,
+      priceBtcUsd: 0,
+      usdToEur: 1,
+      isOverride: false,
+      children: [branch],
+    };
+    const expanded = new Set(['root', 'branch']);
+    const pruned = new Set(['branch']);
+
+    expect(collectLeaves(root, expanded, pruned)).toEqual([]);
+    expect(collectExcluded(root, expanded, pruned)).toEqual([{ node: branch, scaledSats: 100 }]);
   });
 });
 

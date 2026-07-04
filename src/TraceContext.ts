@@ -3,6 +3,7 @@ import { DisplayCurrency } from './config';
 import { KrakenWithdrawalAttribution } from './core/kraken';
 import { KrakenMatch } from './core/match';
 import { SwanWithdrawalAttribution } from './core/swan';
+import { OverrideRecord, PruneRecord } from './core/tree';
 
 interface TraceContextValue {
   displayCurrency: DisplayCurrency;
@@ -15,6 +16,9 @@ interface TraceContextValue {
   // refid -> ledgerTxid, to resolve a persisted match into krakenAttributions
   krakenRefidIndex: Map<string, string>;
   swanAttributions: Map<string, SwanWithdrawalAttribution>;
+  overrideRecords: Map<string, OverrideRecord>; // nodeId -> record
+  pruneRecords: Map<string, PruneRecord>; // nodeId -> record
+  excludedSats: number; // total sats moved out by pruning
 }
 
 export const TraceContext = createContext<TraceContextValue>({
@@ -26,6 +30,9 @@ export const TraceContext = createContext<TraceContextValue>({
   krakenMatches: new Map(),
   krakenRefidIndex: new Map(),
   swanAttributions: new Map(),
+  overrideRecords: new Map(),
+  pruneRecords: new Map(),
+  excludedSats: 0,
 });
 
 export const useTraceContext = () => useContext(TraceContext);

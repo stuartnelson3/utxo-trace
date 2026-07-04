@@ -9,9 +9,13 @@ const oneYearMs = (acquisitionTs: number) => {
 };
 
 describe('isPara23Exempt', () => {
-  it('is false with no disposal or acquisition timestamp', () => {
-    expect(isPara23Exempt(0, 1_700_000_000)).toBe(false);
+  it('is false when disposalTs is the "not set yet" sentinel (0)', () => {
     expect(isPara23Exempt(1_700_000_000, 0)).toBe(false);
+  });
+
+  it('treats acquisitionTs=0 as a real timestamp (epoch), not a sentinel', () => {
+    // Acquired at epoch (1970), disposed decades later — well past a year.
+    expect(isPara23Exempt(0, 1_700_000_000)).toBe(true);
   });
 
   it('boundary: disposal exactly one year after acquisition is NOT exempt', () => {

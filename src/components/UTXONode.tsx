@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { UTXONode as UTXONodeType } from '../core/types';
 import { formatCurrency, formatDate } from '../config';
 import { nodePrice } from '../core/tree';
@@ -19,8 +19,10 @@ interface Props {
   expandedIds: Set<string>;
   onExpand: (id: string) => void;
   onCollapse: (id: string) => void;
-  onRemoveBranch: (id: string) => void;
-  onNodeUpdate: (id: string, patch: Partial<UTXONodeType>) => void;
+  onPruneBranch: (id: string, reason: string) => void;
+  onRestoreBranch: (id: string) => void;
+  onSaveOverride: (id: string, priceUsd: number, memo: string) => void;
+  onClearOverride: (id: string) => void;
   onFindKrakenCandidates?: (
     nodeId: string,
     amountSats: number,
@@ -38,20 +40,26 @@ function describeCandidate(c: MatchCandidate): string {
   return `${date} ${btc} BTC refid ${c.refid}${basisNote}`;
 }
 
+const PRUNE_REASON_PLACEHOLDER =
+  "e.g. 'change output returned to sender', 'not my funds — counterparty input', 'below dust, immaterial'";
+
 const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
   children,
   style,
+  disabled,
   ...props
 }) => (
   <button
     {...props}
+    disabled={disabled}
     style={{
       font: '14px/1.7 monospace',
       border: 'none',
       background: 'none',
       padding: 0,
-      cursor: 'pointer',
-      color: 'var(--link)',
+      cursor: disabled ? 'default' : 'pointer',
+      color: disabled ? 'var(--muted)' : 'var(--link)',
+      opacity: disabled ? 0.6 : 1,
       ...style,
     }}
   >
@@ -64,8 +72,10 @@ const UTXONode: React.FC<Props> = ({
   expandedIds,
   onExpand,
   onCollapse,
-  onRemoveBranch,
-  onNodeUpdate,
+  onPruneBranch,
+  onRestoreBranch,
+  onSaveOverride,
+  onClearOverride,
   onFindKrakenCandidates,
   onConfirmKrakenMatch,
   onRemoveKraken,
@@ -78,11 +88,18 @@ const UTXONode: React.FC<Props> = ({
     krakenMatches,
     krakenRefidIndex,
     swanAttributions,
+    pruneRecords,
   } = useTraceContext();
+
+  const pruneRecord = pruneRecords.get(node.id);
+
   // Look up this node's confirmed Kraken match from the shared context map.
   const matchedKraken = krakenMatches.get(node.id);
   const matchedLedgerTxid = matchedKraken ? krakenRefidIndex.get(matchedKraken.refid) : undefined;
   const [isEditing, setIsEditing] = useState(false);
+  const [priceDraft, setPriceDraft] = useState('');
+  const [memoDraft, setMemoDraft] = useState('');
+  const [pruneReasonDraft, setPruneReasonDraft] = useState<string | null>(null);
   // Candidates found by the last [match kraken] click; null = not searched
   // yet, [] = searched and found nothing.
   const [pendingCandidates, setPendingCandidates] = useState<MatchCandidate[] | null>(null);
@@ -94,6 +111,22 @@ const UTXONode: React.FC<Props> = ({
   const price = nodePrice(node, displayCurrency);
   const nodeBasis = ((node.amountSats || 0) / 1e8) * price;
   const exempt = isPara23Exempt(node.timestamp, disposalTimestamp);
+
+  const displayedOverride =
+    node.isOverride && node.manualPriceUsd !== undefined
+      ? displayCurrency === 'EUR'
+        ? (node.manualPriceUsd * node.usdToEur).toFixed(2)
+        : node.manualPriceUsd.toFixed(2)
+      : '';
+
+  // Opening the form always starts from the node's current committed state.
+  useEffect(() => {
+    if (isEditing) {
+      setPriceDraft(displayedOverride);
+      setMemoDraft(node.memo ?? '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing]);
 
   // Swan: exact txid match (always automatic — txid is unambiguous).
   const swanAttr = swanAttributions.get(node.txid) ?? null;
@@ -125,14 +158,43 @@ const UTXONode: React.FC<Props> = ({
     return lotRows.reduce((s, r) => s + r.basisDisplay, 0);
   }, [lotRows]);
 
-  const displayedOverride =
-    node.isOverride && node.manualPriceUsd !== undefined
-      ? displayCurrency === 'EUR'
-        ? (node.manualPriceUsd * node.usdToEur).toFixed(2)
-        : node.manualPriceUsd.toFixed(2)
-      : '';
-
   const hasConnector = isLastSibling !== undefined;
+
+  // Pruned: render a single collapsed, struck-through row. Data (children,
+  // memo, etc.) is retained untouched underneath — [restore] just deletes
+  // the prune record, nothing is recomputed from scratch.
+  if (pruneRecord) {
+    return (
+      <div style={{ marginTop: hasConnector ? 8 : 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {hasConnector && (
+            <div style={{ width: '2ch', flexShrink: 0, borderBottom: '1px solid var(--border)' }} />
+          )}
+          <div
+            style={{
+              flex: 1,
+              border: '1px dashed var(--border)',
+              padding: '8px 12px',
+              display: 'flex',
+              gap: 12,
+              alignItems: 'baseline',
+              flexWrap: 'wrap',
+              opacity: 0.6,
+            }}
+          >
+            <span style={{ textDecoration: 'line-through' }}>
+              <code style={{ fontSize: 12 }}>{node.txid.substring(0, 20)}…</code>{' '}
+              {(node.amountSats / 1e8).toFixed(8)} BTC
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+              ⊘ excluded: {pruneRecord.reason}
+            </span>
+            <Btn onClick={() => onRestoreBranch(node.id)}>[restore]</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ marginTop: hasConnector ? 8 : 0 }}>
@@ -176,7 +238,7 @@ const UTXONode: React.FC<Props> = ({
               </span>
             )}
             {node.isOverride && (
-              <span style={{ color: 'var(--muted)', fontSize: 12 }}>[override]</span>
+              <span style={{ color: 'var(--taxable)', fontSize: 12 }}>[! asserted]</span>
             )}
           </div>
 
@@ -209,14 +271,8 @@ const UTXONode: React.FC<Props> = ({
                 {isExpanded ? '[collapse]' : '[expand]'}
               </Btn>
             )}
-            {isExpanded && !(swanAttr || krakenAttr) && (
-              <Btn
-                style={{ color: 'var(--taxable)' }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveBranch(node.id);
-                }}
-              >
+            {isExpanded && !(swanAttr || krakenAttr) && pruneReasonDraft === null && (
+              <Btn style={{ color: 'var(--taxable)' }} onClick={() => setPruneReasonDraft('')}>
                 [remove branch]
               </Btn>
             )}
@@ -255,6 +311,44 @@ const UTXONode: React.FC<Props> = ({
             )}
             {node.memo && <span style={{ color: 'var(--muted)', fontSize: 12 }}>{node.memo}</span>}
           </div>
+
+          {/* prune reason form — required, non-empty (Part B) */}
+          {pruneReasonDraft !== null && (
+            <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+              <label
+                style={{ display: 'block', color: 'var(--muted)', fontSize: 12, marginBottom: 4 }}
+              >
+                reason for excluding this branch:
+              </label>
+              <input
+                type="text"
+                placeholder={PRUNE_REASON_PLACEHOLDER}
+                value={pruneReasonDraft}
+                onChange={(e) => setPruneReasonDraft(e.target.value)}
+                style={{
+                  font: '14px/1.7 monospace',
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg)',
+                  color: 'var(--fg)',
+                  padding: '2px 6px',
+                  width: '100%',
+                  marginBottom: 6,
+                }}
+              />
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Btn
+                  disabled={pruneReasonDraft.trim().length === 0}
+                  onClick={() => {
+                    onPruneBranch(node.id, pruneReasonDraft);
+                    setPruneReasonDraft(null);
+                  }}
+                >
+                  [confirm exclude]
+                </Btn>
+                <Btn onClick={() => setPruneReasonDraft(null)}>[cancel]</Btn>
+              </div>
+            </div>
+          )}
 
           {/* Kraken match candidates — one requires a single [confirm] click,
               several require an explicit pick; never pre-selected. */}
@@ -307,7 +401,7 @@ const UTXONode: React.FC<Props> = ({
             />
           )}
 
-          {/* override / memo form */}
+          {/* override form — a non-empty memo (the rationale) is required to save */}
           {isEditing && (
             <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
               <label
@@ -318,20 +412,8 @@ const UTXONode: React.FC<Props> = ({
               <input
                 type="number"
                 placeholder={`price in ${displayCurrency}`}
-                defaultValue={displayedOverride}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === '') {
-                    onNodeUpdate(node.id, { isOverride: false, manualPriceUsd: undefined });
-                  } else {
-                    const entered = parseFloat(val);
-                    const usdValue =
-                      displayCurrency === 'EUR' && node.usdToEur > 0
-                        ? entered / node.usdToEur
-                        : entered;
-                    onNodeUpdate(node.id, { isOverride: true, manualPriceUsd: usdValue });
-                  }
-                }}
+                value={priceDraft}
+                onChange={(e) => setPriceDraft(e.target.value)}
                 style={{
                   font: '14px/1.7 monospace',
                   border: '1px solid var(--border)',
@@ -350,13 +432,13 @@ const UTXONode: React.FC<Props> = ({
                   marginTop: 8,
                 }}
               >
-                memo:
+                memo (required — state the source of this price, e.g. 'P2P purchase, invoice #…'):
               </label>
               <input
                 type="text"
-                placeholder="e.g. P2P purchase from Kraken"
-                defaultValue={node.memo}
-                onChange={(e) => onNodeUpdate(node.id, { memo: e.target.value })}
+                placeholder="state the source of this price — e.g. 'P2P purchase, invoice #…'"
+                value={memoDraft}
+                onChange={(e) => setMemoDraft(e.target.value)}
                 style={{
                   font: '14px/1.7 monospace',
                   border: '1px solid var(--border)',
@@ -364,8 +446,37 @@ const UTXONode: React.FC<Props> = ({
                   color: 'var(--fg)',
                   padding: '2px 6px',
                   width: '100%',
+                  marginBottom: 6,
                 }}
               />
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Btn
+                  disabled={priceDraft.trim().length === 0 || memoDraft.trim().length === 0}
+                  onClick={() => {
+                    const entered = parseFloat(priceDraft);
+                    const usdValue =
+                      displayCurrency === 'EUR' && node.usdToEur > 0
+                        ? entered / node.usdToEur
+                        : entered;
+                    onSaveOverride(node.id, usdValue, memoDraft);
+                    setIsEditing(false);
+                  }}
+                >
+                  [save]
+                </Btn>
+                {node.isOverride && (
+                  <Btn
+                    style={{ color: 'var(--taxable)' }}
+                    onClick={() => {
+                      onClearOverride(node.id);
+                      setIsEditing(false);
+                    }}
+                  >
+                    [clear override]
+                  </Btn>
+                )}
+                <Btn onClick={() => setIsEditing(false)}>[cancel]</Btn>
+              </div>
             </div>
           )}
         </div>
@@ -387,8 +498,10 @@ const UTXONode: React.FC<Props> = ({
               expandedIds={expandedIds}
               onExpand={onExpand}
               onCollapse={onCollapse}
-              onRemoveBranch={onRemoveBranch}
-              onNodeUpdate={onNodeUpdate}
+              onPruneBranch={onPruneBranch}
+              onRestoreBranch={onRestoreBranch}
+              onSaveOverride={onSaveOverride}
+              onClearOverride={onClearOverride}
               onFindKrakenCandidates={onFindKrakenCandidates}
               onConfirmKrakenMatch={onConfirmKrakenMatch}
               onRemoveKraken={onRemoveKraken}

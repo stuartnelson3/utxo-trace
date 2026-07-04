@@ -1,17 +1,19 @@
 import React, { forwardRef } from 'react';
 import { UTXONode } from '../core/types';
-import { ScaledLeaf, nodePrice, leafBasis } from '../core/tree';
+import { ScaledLeaf, nodePrice, leafBasis, findNode } from '../core/tree';
 import { isPara23Exempt } from '../core/holding';
 import { formatDate, formatCurrency } from '../config';
 import { useTraceContext } from '../TraceContext';
 import { krakenToLotRows } from '../core/kraken';
 import { swanToLotRows } from '../core/swan';
 import LotTable from './LotTable';
+import Legend from './Legend';
 
 interface Props {
   rootNode: UTXONode;
   totalBasis: number;
   leaves: ScaledLeaf[];
+  excludedLeaves: ScaledLeaf[];
   expandedIds: Set<string>;
 }
 
@@ -29,7 +31,7 @@ const Row: React.FC<{ label: string; value: React.ReactNode; muted?: boolean }> 
 );
 
 const BasisReport = forwardRef<HTMLDivElement, Props>(
-  ({ rootNode, totalBasis, leaves, expandedIds }, ref) => {
+  ({ rootNode, totalBasis, leaves, excludedLeaves, expandedIds }, ref) => {
     if (!rootNode) return null;
 
     const {
@@ -41,8 +43,12 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
       krakenMatches,
       krakenRefidIndex,
       swanAttributions,
+      overrideRecords,
+      pruneRecords,
     } = useTraceContext();
     const fmt = (val: number) => formatCurrency(val, displayCurrency);
+    const fmtBoth = (usd: number, eur: number) =>
+      `${formatCurrency(usd, 'USD')} / ${formatCurrency(eur, 'EUR')}`;
 
     const getLineagePath = (node: UTXONode, path: any[] = []) => {
       path.push({
@@ -67,6 +73,13 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
       return sum + leafBasis(leaf, displayCurrency);
     }, 0);
     const taxableBasis = totalBasis - exemptBasis;
+
+    // Mass-balance reconciliation: attributed + excluded === traced.
+    const attributedSats = leaves.reduce((s, l) => s + l.scaledSats, 0);
+    const excludedSats = excludedLeaves.reduce((s, l) => s + l.scaledSats, 0);
+    const tracedSats = attributedSats + excludedSats;
+
+    const overrides = [...overrideRecords.values()].sort((a, b) => a.assertedAt - b.assertedAt);
 
     return (
       <div
@@ -106,7 +119,32 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
             }
           />
           <Row label="@ unit price" value={`${fmt(rootUnitPrice)}/BTC`} muted />
-          <Row label="acquisition basis" value={<strong>{fmt(totalBasis)}</strong>} />
+          <Row
+            label="acquisition basis"
+            value={
+              <>
+                <strong>{fmt(totalBasis)}</strong>
+                {overrides.length > 0 && (
+                  <span style={{ color: '#b60', fontSize: 10, marginLeft: 6 }}>
+                    (includes {overrides.length} manually asserted price
+                    {overrides.length === 1 ? '' : 's'})
+                  </span>
+                )}
+              </>
+            }
+          />
+          {excludedSats > 0 && (
+            <Row
+              label="reconciliation"
+              value={
+                <span style={{ fontSize: 10, color: '#555' }}>
+                  traced inputs {(tracedSats / 1e8).toFixed(8)} BTC = attributed{' '}
+                  {(attributedSats / 1e8).toFixed(8)} BTC + excluded{' '}
+                  {(excludedSats / 1e8).toFixed(8)} BTC
+                </span>
+              }
+            />
+          )}
           <Row
             label={gainLoss >= 0 ? 'realized gain' : 'realized loss'}
             value={
@@ -256,6 +294,86 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           })}
         </div>
 
+        {/* Manual price assertions */}
+        {overrides.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div
+              style={{
+                fontWeight: 'bold',
+                borderBottom: '1px solid #000',
+                marginBottom: 8,
+                paddingBottom: 4,
+              }}
+            >
+              manual price assertions
+            </div>
+            {overrides.map((o, i) => {
+              const node = findNode(rootNode, o.nodeId);
+              const usdToEur = node?.usdToEur ?? 1;
+              return (
+                <div
+                  key={i}
+                  style={{ borderBottom: '1px solid #ddd', padding: '6px 0', fontSize: 11 }}
+                >
+                  <div
+                    style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}
+                  >
+                    <span style={{ color: '#b60' }}>!</span>
+                    <code style={{ color: '#555', wordBreak: 'break-all' }}>
+                      {o.txid}:{o.vout}
+                    </code>
+                    <span style={{ color: '#999' }}>{new Date(o.assertedAt).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    asserted: <strong>{fmtBoth(o.priceUsd, o.priceUsd * usdToEur)}</strong>/BTC —
+                    replaced{' '}
+                    {o.previousPriceUsd != null
+                      ? `${fmtBoth(o.previousPriceUsd, o.previousPriceUsd * usdToEur)}/BTC (${o.previousSource})`
+                      : `unknown price (${o.previousSource})`}
+                  </div>
+                  <div style={{ color: '#555' }}>{o.memo}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Excluded branches */}
+        {[...pruneRecords.values()].length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div
+              style={{
+                fontWeight: 'bold',
+                borderBottom: '1px solid #000',
+                marginBottom: 8,
+                paddingBottom: 4,
+              }}
+            >
+              excluded branches
+            </div>
+            {[...pruneRecords.values()]
+              .sort((a, b) => a.prunedAt - b.prunedAt)
+              .map((p, i) => (
+                <div
+                  key={i}
+                  style={{ borderBottom: '1px solid #ddd', padding: '6px 0', fontSize: 11 }}
+                >
+                  <div
+                    style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}
+                  >
+                    <span>⊘</span>
+                    <code style={{ color: '#555', wordBreak: 'break-all' }}>
+                      {p.txid}:{p.vout}
+                    </code>
+                    <span>{(p.amountSats / 1e8).toFixed(8)} BTC</span>
+                    <span style={{ color: '#999' }}>{new Date(p.prunedAt).toLocaleString()}</span>
+                  </div>
+                  <div style={{ color: '#555' }}>{p.reason}</div>
+                </div>
+              ))}
+          </div>
+        )}
+
         {/* Lineage path */}
         <div style={{ marginBottom: 20 }}>
           <div
@@ -292,6 +410,11 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Legend */}
+        <div style={{ marginBottom: 12 }}>
+          <Legend dark={false} />
         </div>
 
         {/* Footer */}

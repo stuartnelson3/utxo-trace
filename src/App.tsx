@@ -2,9 +2,19 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import UTXONode from './components/UTXONode';
 import BasisReport from './components/BasisReport';
+import Legend from './components/Legend';
 import { UTXONode as UTXONodeType } from './core/types';
 import { fetchNodeData, fetchChildNodes, fetchRawBtcUsd, fetchUsdToEurRate, queue } from './api';
-import { collectLeaves, sumBasis, updateNode, findNode, nodePrice } from './core/tree';
+import {
+  collectLeaves,
+  collectExcluded,
+  sumBasis,
+  updateNode,
+  findNode,
+  nodePrice,
+  OverrideRecord,
+  PruneRecord,
+} from './core/tree';
 import { formatCurrency, APP_CONFIG, DisplayCurrency } from './config';
 import { TraceContext } from './TraceContext';
 import { findMatchCandidates, findNearestMiss, MatchCandidate, KrakenMatch } from './core/match';
@@ -66,6 +76,11 @@ const App: React.FC = () => {
     }
     return index;
   }, [krakenLedger]);
+
+  // Manual interventions — first-class, disclosed, mandatory rationale.
+  const [overrideRecords, setOverrideRecords] = useState<Map<string, OverrideRecord>>(new Map());
+  const [pruneRecords, setPruneRecords] = useState<Map<string, PruneRecord>>(new Map());
+  const prunedIds = useMemo(() => new Set(pruneRecords.keys()), [pruneRecords]);
 
   // Swan state — automatic matching via Bitcoin txid (exact, no ambiguity)
   const [swanAttributions, setSwanAttributions] = useState<Map<
@@ -152,12 +167,29 @@ const App: React.FC = () => {
     });
   };
 
-  const handleRemoveBranch = (nodeId: string) => {
-    setRootNode((prev) =>
-      prev ? updateNode(prev, nodeId, (n) => ({ ...n, children: [] })) : null
-    );
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
+  // Soft prune: the subtree is excluded from the computation (collectLeaves
+  // skips it, collectExcluded accounts for it) but never deleted from state,
+  // so it can always be restored.
+  const handlePruneBranch = (nodeId: string, reason: string) => {
+    const node = rootNode ? findNode(rootNode, nodeId) : null;
+    if (!node) return;
+    setPruneRecords((prev) => {
+      const next = new Map(prev);
+      next.set(nodeId, {
+        nodeId,
+        txid: node.txid,
+        vout: node.vout,
+        amountSats: node.amountSats,
+        reason,
+        prunedAt: Date.now(),
+      });
+      return next;
+    });
+  };
+
+  const handleRestoreBranch = (nodeId: string) => {
+    setPruneRecords((prev) => {
+      const next = new Map(prev);
       next.delete(nodeId);
       return next;
     });
@@ -165,6 +197,40 @@ const App: React.FC = () => {
 
   const handleNodeUpdate = (nodeId: string, patch: Partial<UTXONodeType>) => {
     setRootNode((prev) => (prev ? updateNode(prev, nodeId, (n) => ({ ...n, ...patch })) : null));
+  };
+
+  // Overrides require a non-empty memo to save (the memo IS the rationale —
+  // see the UI hint) and are recorded with what they replaced, so the report
+  // can disclose the assertion rather than silently blending it into "mempool".
+  const handleSaveOverride = (nodeId: string, priceUsd: number, memo: string) => {
+    const node = rootNode ? findNode(rootNode, nodeId) : null;
+    if (!node || !memo.trim()) return;
+    const previousPriceUsd = node.isOverride ? (node.manualPriceUsd ?? null) : node.priceBtcUsd;
+    const previousSource = node.isOverride ? 'override' : 'mempool';
+    setOverrideRecords((prev) => {
+      const next = new Map(prev);
+      next.set(nodeId, {
+        nodeId,
+        txid: node.txid,
+        vout: node.vout,
+        priceUsd,
+        previousPriceUsd,
+        previousSource,
+        memo,
+        assertedAt: Date.now(),
+      });
+      return next;
+    });
+    handleNodeUpdate(nodeId, { isOverride: true, manualPriceUsd: priceUsd, memo });
+  };
+
+  const handleClearOverride = (nodeId: string) => {
+    setOverrideRecords((prev) => {
+      const next = new Map(prev);
+      next.delete(nodeId);
+      return next;
+    });
+    handleNodeUpdate(nodeId, { isOverride: false, manualPriceUsd: undefined });
   };
 
   // Fee-aware, time-windowed candidate search (never auto-selects among
@@ -345,8 +411,17 @@ const App: React.FC = () => {
   }, [rootNode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const leaves = useMemo(
-    () => (rootNode ? collectLeaves(rootNode, expandedIds) : []),
-    [rootNode, expandedIds]
+    () => (rootNode ? collectLeaves(rootNode, expandedIds, prunedIds) : []),
+    [rootNode, expandedIds, prunedIds]
+  );
+
+  const excludedLeaves = useMemo(
+    () => (rootNode ? collectExcluded(rootNode, expandedIds, prunedIds) : []),
+    [rootNode, expandedIds, prunedIds]
+  );
+  const totalExcludedSats = useMemo(
+    () => excludedLeaves.reduce((s, l) => s + l.scaledSats, 0),
+    [excludedLeaves]
   );
 
   // Attach basisOverride to leaves.
@@ -403,6 +478,9 @@ const App: React.FC = () => {
       krakenMatches,
       krakenRefidIndex,
       swanAttributions: swanAttributions ?? new Map(),
+      overrideRecords,
+      pruneRecords,
+      excludedSats: totalExcludedSats,
     }),
     [
       displayCurrency,
@@ -413,6 +491,9 @@ const App: React.FC = () => {
       krakenMatches,
       krakenRefidIndex,
       swanAttributions,
+      overrideRecords,
+      pruneRecords,
+      totalExcludedSats,
     ]
   );
 
@@ -690,8 +771,10 @@ const App: React.FC = () => {
               expandedIds={expandedIds}
               onExpand={handleExpand}
               onCollapse={handleCollapse}
-              onRemoveBranch={handleRemoveBranch}
-              onNodeUpdate={handleNodeUpdate}
+              onPruneBranch={handlePruneBranch}
+              onRestoreBranch={handleRestoreBranch}
+              onSaveOverride={handleSaveOverride}
+              onClearOverride={handleClearOverride}
               onFindKrakenCandidates={handleFindKrakenCandidates}
               onConfirmKrakenMatch={handleConfirmKrakenMatch}
               onRemoveKraken={handleRemoveKraken}
@@ -710,6 +793,11 @@ const App: React.FC = () => {
           fontSize: 12,
         }}
       >
+        {rootNode && (
+          <div style={{ marginBottom: 12 }}>
+            <Legend />
+          </div>
+        )}
         not financial or tax advice. blockchain prices from{' '}
         <a href="https://mempool.space" target="_blank">
           mempool.space
@@ -732,6 +820,7 @@ const App: React.FC = () => {
               rootNode={rootNode}
               totalBasis={totalBasis}
               leaves={leavesWithAttribution}
+              excludedLeaves={excludedLeaves}
               expandedIds={expandedIds}
             />
           </TraceContext.Provider>

@@ -17,6 +17,19 @@ export interface ScaledLeaf {
   basisOverride?: BasisOverride;
 }
 
+// A manually-asserted price, recorded with mandatory rationale so the
+// report can disclose it rather than silently blending it into "mempool".
+export interface OverrideRecord {
+  nodeId: string;
+  txid: string;
+  vout: number;
+  priceUsd: number;
+  previousPriceUsd: number | null;
+  previousSource: string;
+  memo: string;
+  assertedAt: number;
+}
+
 // Price of one BTC at this node in the requested currency.
 export function nodePrice(node: UTXONode, currency: DisplayCurrency): number {
   const usd = node.isOverride ? (node.manualPriceUsd ?? 0) : node.priceBtcUsd;
@@ -44,27 +57,56 @@ export function sumBasis(leaves: ScaledLeaf[], currency: DisplayCurrency): numbe
   return leaves.reduce((sum, leaf) => sum + leafBasis(leaf, currency), 0);
 }
 
+// A pruned branch is excluded from the computation but its data is kept —
+// see collectExcluded, which walks the identical ratio math to account for
+// exactly what was left out (attributed + excluded === traced, always).
+export interface PruneRecord {
+  nodeId: string;
+  txid: string;
+  vout: number;
+  amountSats: number;
+  reason: string;
+  prunedAt: number;
+}
+
 // Traversal: walk the expanded tree and collect leaf nodes with their
-// proportionally scaled satoshi amounts.
+// proportionally scaled satoshi amounts. Pruned nodes (and their subtrees)
+// contribute nothing here — see collectExcluded for their share.
 export function collectLeaves(
   node: UTXONode,
   expandedIds: Set<string>,
+  prunedIds: Set<string> = new Set(),
   scale = 1
 ): ScaledLeaf[] {
+  if (prunedIds.has(node.id)) return [];
   if (expandedIds.has(node.id) && node.children.length > 0) {
     const childrenSats = node.children.reduce((sum, c) => sum + c.amountSats, 0);
     const ratio = node.amountSats / childrenSats;
-    return node.children.flatMap((c) => collectLeaves(c, expandedIds, scale * ratio));
+    return node.children.flatMap((c) => collectLeaves(c, expandedIds, prunedIds, scale * ratio));
   }
   return [{ node, scaledSats: node.amountSats * scale }];
 }
 
+// The mirror image of collectLeaves: the scaled sats of every pruned
+// subtree, using the identical proportional-scaling math, so that
+// sum(collectLeaves) + sum(collectExcluded) === root.amountSats always.
+export function collectExcluded(
+  node: UTXONode,
+  expandedIds: Set<string>,
+  prunedIds: Set<string>,
+  scale = 1
+): ScaledLeaf[] {
+  if (prunedIds.has(node.id)) return [{ node, scaledSats: node.amountSats * scale }];
+  if (expandedIds.has(node.id) && node.children.length > 0) {
+    const childrenSats = node.children.reduce((sum, c) => sum + c.amountSats, 0);
+    const ratio = node.amountSats / childrenSats;
+    return node.children.flatMap((c) => collectExcluded(c, expandedIds, prunedIds, scale * ratio));
+  }
+  return [];
+}
+
 // Immutable tree update: apply fn to the node with the given id, return new root.
-export function updateNode(
-  root: UTXONode,
-  id: string,
-  fn: (node: UTXONode) => UTXONode
-): UTXONode {
+export function updateNode(root: UTXONode, id: string, fn: (node: UTXONode) => UTXONode): UTXONode {
   if (root.id === id) return fn(root);
   if (root.children.length === 0) return root;
   return { ...root, children: root.children.map((c) => updateNode(c, id, fn)) };
