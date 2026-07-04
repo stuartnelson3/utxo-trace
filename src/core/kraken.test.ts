@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  detectCsvType,
-  parseKrakenLedger,
-  parseKrakenTrades,
-  buildAttributions,
-} from './kraken';
+import { detectCsvType, parseKrakenLedger, parseKrakenTrades, buildAttributions } from './kraken';
 import { findMatchingWithdrawal } from './match';
 import { sumBasis, leafBasis, ScaledLeaf } from './tree';
 import { UTXONode } from './types';
@@ -31,7 +26,13 @@ function ledgerRow(
   return `"${txid}","${refid}","${time}","${type}","","currency","BTC","spot / main",${amount},${fee},${balance}`;
 }
 
-function tradeRow(txid: string, pair: string, price: number, vol: number, ledgerTxid: string): string {
+function tradeRow(
+  txid: string,
+  pair: string,
+  price: number,
+  vol: number,
+  ledgerTxid: string
+): string {
   const cost = price * vol;
   return `"${txid}","ORD-${txid}","${pair}","forex","crypto","2023-01-01 00:00:00.0000","buy","limit",${price},${cost},0,${vol},0,"","${ledgerTxid}","","","","","","","","",""`;
 }
@@ -79,8 +80,8 @@ describe('parseKrakenLedger', () => {
       ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', 1.001, 0.001, 1.0),
     ].join('\n');
     const rows = parseKrakenLedger(csv);
-    expect(rows[0].amount).toBeCloseTo(1.001);
-    expect(rows[0].fee).toBeCloseTo(0.001);
+    expect(rows[0].amountSats).toBe(100_100_000);
+    expect(rows[0].feeSats).toBe(100_000);
   });
 
   it('sorts rows by time ascending', () => {
@@ -101,10 +102,7 @@ describe('parseKrakenLedger', () => {
 
 describe('parseKrakenTrades', () => {
   it('indexes BTC/EUR trades by txid', () => {
-    const csv = [
-      TRADES_HEADER,
-      tradeRow('T1', 'BTC/EUR', 30000, 0.5, 'L1'),
-    ].join('\n');
+    const csv = [TRADES_HEADER, tradeRow('T1', 'BTC/EUR', 30000, 0.5, 'L1')].join('\n');
     const map = parseKrakenTrades(csv);
     expect(map.has('T1')).toBe(true);
     expect(map.get('T1')!.price).toBe(30000);
@@ -112,19 +110,13 @@ describe('parseKrakenTrades', () => {
   });
 
   it('includes non-EUR BTC pairs (price will be ignored by FIFO)', () => {
-    const csv = [
-      TRADES_HEADER,
-      tradeRow('T1', 'TRX/BTC', 0.0000019, 2880, 'L1'),
-    ].join('\n');
+    const csv = [TRADES_HEADER, tradeRow('T1', 'TRX/BTC', 0.0000019, 2880, 'L1')].join('\n');
     const map = parseKrakenTrades(csv);
     expect(map.has('T1')).toBe(true);
   });
 
   it('excludes non-BTC pairs', () => {
-    const csv = [
-      TRADES_HEADER,
-      tradeRow('T1', 'ETH/EUR', 2000, 1.0, 'L1'),
-    ].join('\n');
+    const csv = [TRADES_HEADER, tradeRow('T1', 'ETH/EUR', 2000, 1.0, 'L1')].join('\n');
     const map = parseKrakenTrades(csv);
     expect(map.size).toBe(0);
   });
@@ -135,21 +127,21 @@ describe('parseKrakenTrades', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildAttributions', () => {
-
   // Scenario A: single BTC/EUR trade → single withdrawal, exact match
   // Lot: 1.0 BTC @ 30 000 EUR
   // Withdrawal: 1.0 BTC, fee 0
   // Expected basis: 1.0 × 30 000 = 30 000 EUR
   it('attributes a single lot to a matching withdrawal', () => {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade',      1.0, 0, 1.0),
-      ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -1.0, 0, 0),
-    ].join('\n'));
-    const trades = parseKrakenTrades([
-      TRADES_HEADER,
-      tradeRow('T1', 'BTC/EUR', 30000, 1.0, 'L1'),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', 1.0, 0, 1.0),
+        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -1.0, 0, 0),
+      ].join('\n')
+    );
+    const trades = parseKrakenTrades(
+      [TRADES_HEADER, tradeRow('T1', 'BTC/EUR', 30000, 1.0, 'L1')].join('\n')
+    );
 
     const attrs = buildAttributions(ledger, trades);
     expect(attrs.size).toBe(1);
@@ -166,15 +158,16 @@ describe('buildAttributions', () => {
   // Gross: 1.001 BTC, fee: 0.001 BTC → net: 1.000 BTC in queue
   // Withdrawal: 1.0 BTC, fee 0
   it('uses net lot size (amount − fee) for BTC-fee trades', () => {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade',      1.001, 0.001, 1.0),
-      ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -1.0,  0,     0),
-    ].join('\n'));
-    const trades = parseKrakenTrades([
-      TRADES_HEADER,
-      tradeRow('T1', 'BTC/EUR', 30000, 1.0, 'L1'),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', 1.001, 0.001, 1.0),
+        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -1.0, 0, 0),
+      ].join('\n')
+    );
+    const trades = parseKrakenTrades(
+      [TRADES_HEADER, tradeRow('T1', 'BTC/EUR', 30000, 1.0, 'L1')].join('\n')
+    );
 
     const attrs = buildAttributions(ledger, trades);
     const attr = attrs.get('LW')!;
@@ -187,11 +180,13 @@ describe('buildAttributions', () => {
   // Receive: 0.25 BTC, fee 0.00025 → net 0.24975 BTC
   // Withdrawal: 0.24975 BTC
   it('marks receive-entry lots with null price (mempool source)', () => {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'TR1', '2023-01-01 00:00:00', 'receive',    0.25,     0.00025, 0.24975),
-      ledgerRow('LW', 'AW',  '2023-02-01 00:00:00', 'withdrawal', -0.24975, 0,       0),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'TR1', '2023-01-01 00:00:00', 'receive', 0.25, 0.00025, 0.24975),
+        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -0.24975, 0, 0),
+      ].join('\n')
+    );
     const trades = parseKrakenTrades(`${TRADES_HEADER}\n`); // empty
 
     const attrs = buildAttributions(ledger, trades);
@@ -209,17 +204,21 @@ describe('buildAttributions', () => {
   // Expected: consume all of A (0.5) + 0.2 from B
   // Basis: 0.5×20 000 + 0.2×25 000 = 10 000 + 5 000 = 15 000 EUR
   it('applies FIFO ordering across multiple lots', () => {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade',      0.5, 0, 0.5),
-      ledgerRow('L2', 'T2', '2023-01-15 00:00:00', 'trade',      0.5, 0, 1.0),
-      ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -0.7, 0, 0.3),
-    ].join('\n'));
-    const trades = parseKrakenTrades([
-      TRADES_HEADER,
-      tradeRow('T1', 'BTC/EUR', 20000, 0.5, 'L1'),
-      tradeRow('T2', 'BTC/EUR', 25000, 0.5, 'L2'),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', 0.5, 0, 0.5),
+        ledgerRow('L2', 'T2', '2023-01-15 00:00:00', 'trade', 0.5, 0, 1.0),
+        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -0.7, 0, 0.3),
+      ].join('\n')
+    );
+    const trades = parseKrakenTrades(
+      [
+        TRADES_HEADER,
+        tradeRow('T1', 'BTC/EUR', 20000, 0.5, 'L1'),
+        tradeRow('T2', 'BTC/EUR', 25000, 0.5, 'L2'),
+      ].join('\n')
+    );
 
     const attrs = buildAttributions(ledger, trades);
     const attr = attrs.get('LW')!;
@@ -238,20 +237,24 @@ describe('buildAttributions', () => {
   // Expected: 0.3 from B residual + 0.1 from C
   // Basis: 0.3×25 000 + 0.1×28 000 = 7 500 + 2 800 = 10 300 EUR
   it('carries FIFO residuals across sequential withdrawals', () => {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade',      0.5, 0, 0.5),
-      ledgerRow('L2', 'T2', '2023-01-15 00:00:00', 'trade',      0.5, 0, 1.0),
-      ledgerRow('LW1', 'AW1', '2023-02-01 00:00:00', 'withdrawal', -0.7, 0, 0.3),
-      ledgerRow('L3', 'T3', '2023-02-10 00:00:00', 'trade',      0.2, 0, 0.5),
-      ledgerRow('LW2', 'AW2', '2023-03-01 00:00:00', 'withdrawal', -0.4, 0, 0.1),
-    ].join('\n'));
-    const trades = parseKrakenTrades([
-      TRADES_HEADER,
-      tradeRow('T1', 'BTC/EUR', 20000, 0.5, 'L1'),
-      tradeRow('T2', 'BTC/EUR', 25000, 0.5, 'L2'),
-      tradeRow('T3', 'BTC/EUR', 28000, 0.2, 'L3'),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', 0.5, 0, 0.5),
+        ledgerRow('L2', 'T2', '2023-01-15 00:00:00', 'trade', 0.5, 0, 1.0),
+        ledgerRow('LW1', 'AW1', '2023-02-01 00:00:00', 'withdrawal', -0.7, 0, 0.3),
+        ledgerRow('L3', 'T3', '2023-02-10 00:00:00', 'trade', 0.2, 0, 0.5),
+        ledgerRow('LW2', 'AW2', '2023-03-01 00:00:00', 'withdrawal', -0.4, 0, 0.1),
+      ].join('\n')
+    );
+    const trades = parseKrakenTrades(
+      [
+        TRADES_HEADER,
+        tradeRow('T1', 'BTC/EUR', 20000, 0.5, 'L1'),
+        tradeRow('T2', 'BTC/EUR', 25000, 0.5, 'L2'),
+        tradeRow('T3', 'BTC/EUR', 28000, 0.2, 'L3'),
+      ].join('\n')
+    );
 
     const attrs = buildAttributions(ledger, trades);
 
@@ -276,15 +279,16 @@ describe('buildAttributions', () => {
   // Withdrawal: amount=-0.19 BTC, fee=0.01 BTC → total consume = 0.20 BTC
   // After withdrawal: queue empty, UTXO receives 0.19 BTC
   it('withdraws both amount and fee from the queue', () => {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade',      0.2,   0,    0.2),
-      ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -0.19, 0.01, 0),
-    ].join('\n'));
-    const trades = parseKrakenTrades([
-      TRADES_HEADER,
-      tradeRow('T1', 'BTC/EUR', 20000, 0.2, 'L1'),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', 0.2, 0, 0.2),
+        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -0.19, 0.01, 0),
+      ].join('\n')
+    );
+    const trades = parseKrakenTrades(
+      [TRADES_HEADER, tradeRow('T1', 'BTC/EUR', 20000, 0.2, 'L1')].join('\n')
+    );
 
     const attrs = buildAttributions(ledger, trades);
     const attr = attrs.get('LW')!;
@@ -297,15 +301,16 @@ describe('buildAttributions', () => {
   // Scenario G: non-EUR-pair trade → null price (price column is not EUR/BTC)
   // e.g. TRX/BTC swap — price is BTC-per-TRX, not EUR-per-BTC
   it('sets null price for non-BTC/EUR trades', () => {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade',      0.005, 0, 0.005),
-      ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -0.005, 0, 0),
-    ].join('\n'));
-    const trades = parseKrakenTrades([
-      TRADES_HEADER,
-      tradeRow('T1', 'TRX/BTC', 0.0000019, 2631, 'L1'),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', 0.005, 0, 0.005),
+        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -0.005, 0, 0),
+      ].join('\n')
+    );
+    const trades = parseKrakenTrades(
+      [TRADES_HEADER, tradeRow('T1', 'TRX/BTC', 0.0000019, 2631, 'L1')].join('\n')
+    );
 
     const attrs = buildAttributions(ledger, trades);
     const attr = attrs.get('LW')!;
@@ -316,16 +321,17 @@ describe('buildAttributions', () => {
 
   // Scenario H: mixed priceSource classification
   it('classifies priceSource as "mixed" when lots span both sources', () => {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'T1',  '2023-01-01 00:00:00', 'receive',    0.1, 0, 0.1), // no trades entry
-      ledgerRow('L2', 'T2',  '2023-01-15 00:00:00', 'trade',      0.1, 0, 0.2),
-      ledgerRow('LW', 'AW',  '2023-02-01 00:00:00', 'withdrawal', -0.2, 0, 0),
-    ].join('\n'));
-    const trades = parseKrakenTrades([
-      TRADES_HEADER,
-      tradeRow('T2', 'BTC/EUR', 25000, 0.1, 'L2'),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'receive', 0.1, 0, 0.1), // no trades entry
+        ledgerRow('L2', 'T2', '2023-01-15 00:00:00', 'trade', 0.1, 0, 0.2),
+        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -0.2, 0, 0),
+      ].join('\n')
+    );
+    const trades = parseKrakenTrades(
+      [TRADES_HEADER, tradeRow('T2', 'BTC/EUR', 25000, 0.1, 'L2')].join('\n')
+    );
 
     const attrs = buildAttributions(ledger, trades);
     expect(attrs.get('LW')!.priceSource).toBe('mixed');
@@ -339,11 +345,13 @@ describe('buildAttributions', () => {
 describe('findMatchingWithdrawal', () => {
   // Build a minimal set of attributions for matching tests
   function makeAttrs(withdrawalBtc: number) {
-    const ledger = parseKrakenLedger([
-      LEDGER_HEADER,
-      ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade',       withdrawalBtc, 0, withdrawalBtc),
-      ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -withdrawalBtc, 0, 0),
-    ].join('\n'));
+    const ledger = parseKrakenLedger(
+      [
+        LEDGER_HEADER,
+        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', withdrawalBtc, 0, withdrawalBtc),
+        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -withdrawalBtc, 0, 0),
+      ].join('\n')
+    );
     return buildAttributions(ledger, new Map());
   }
 
@@ -426,7 +434,7 @@ describe('sumBasis with basisOverride', () => {
 
     const leaves: ScaledLeaf[] = [
       { node: node1, scaledSats: amountSats, basisOverride: { usd: 30000 / 0.92, eur: 30000 } }, // 30 000 EUR
-      { node: node2, scaledSats: amountSats },  // 40 000 × 0.92 = 36 800 EUR
+      { node: node2, scaledSats: amountSats }, // 40 000 × 0.92 = 36 800 EUR
     ];
     expect(sumBasis(leaves, 'EUR')).toBeCloseTo(66800);
   });

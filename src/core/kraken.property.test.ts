@@ -33,8 +33,8 @@ const arbLedgerAndTrades = fc
           refid: id,
           time: new Date(t),
           type: 'withdrawal',
-          amount: -withdrawSats / 1e8,
-          fee: 0,
+          amountSats: -withdrawSats,
+          feeSats: 0,
         });
       } else {
         balance += op.sats;
@@ -43,8 +43,8 @@ const arbLedgerAndTrades = fc
           refid: id,
           time: new Date(t),
           type: 'trade',
-          amount: op.sats / 1e8,
-          fee: 0,
+          amountSats: op.sats,
+          feeSats: 0,
         });
         trades.set(id, { txid: id, pair: 'BTC/EUR', price: op.price });
       }

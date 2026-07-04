@@ -1,6 +1,7 @@
 import { parseCSV } from './csvUtils';
 import { DisplayCurrency } from '../config';
 import { classifyPriceSource } from './lots';
+import { parseBtcToSats } from './sats';
 
 export type PriceSource = 'trades-csv' | 'mempool';
 export type AttributionPriceSource = 'trades-csv' | 'mixed' | 'mempool';
@@ -46,13 +47,14 @@ export function detectCsvType(text: string): 'ledger' | 'trades' | null {
 }
 
 // Exported so App.tsx can store and merge entries across multiple files.
+// amountSats is signed (negative for withdrawals); feeSats is always >= 0.
 export interface LedgerEntry {
   txid: string;
   refid: string;
   time: Date;
   type: string;
-  amount: number;
-  fee: number;
+  amountSats: number;
+  feeSats: number;
 }
 
 export interface TradeEntry {
@@ -63,14 +65,14 @@ export interface TradeEntry {
 
 export function parseKrakenLedger(text: string): LedgerEntry[] {
   return parseCSV(text)
-    .filter(r => r.asset === 'BTC')
-    .map(r => ({
+    .filter((r) => r.asset === 'BTC')
+    .map((r) => ({
       txid: r.txid,
       refid: r.refid,
       time: new Date(r.time.replace(' ', 'T') + 'Z'),
       type: r.type,
-      amount: parseFloat(r.amount) || 0,
-      fee: parseFloat(r.fee) || 0,
+      amountSats: parseBtcToSats(r.amount),
+      feeSats: parseBtcToSats(r.fee),
     }))
     .sort((a, b) => a.time.getTime() - b.time.getTime());
 }
@@ -103,10 +105,10 @@ export function buildAttributions(
   const result = new Map<string, KrakenWithdrawalAttribution>();
 
   for (const entry of ledger) {
-    const absSats = Math.round(Math.abs(entry.amount) * 1e8);
-    const feeSats = Math.round(entry.fee * 1e8);
+    const absSats = Math.abs(entry.amountSats);
+    const feeSats = entry.feeSats;
 
-    if ((entry.type === 'trade' || entry.type === 'receive') && entry.amount > 0) {
+    if ((entry.type === 'trade' || entry.type === 'receive') && entry.amountSats > 0) {
       const netSats = Math.max(0, absSats - feeSats);
       const trade = trades.get(entry.refid);
       const isEurPair = trade?.pair === 'BTC/EUR';
@@ -125,7 +127,7 @@ export function buildAttributions(
         },
         residualSats: netSats,
       });
-    } else if (entry.type === 'withdrawal' && entry.amount < 0) {
+    } else if (entry.type === 'withdrawal' && entry.amountSats < 0) {
       const withdrawalSats = absSats;
       const totalConsume = absSats + feeSats;
 
@@ -144,10 +146,7 @@ export function buildAttributions(
           attributedLots.push({
             lot: item.lot,
             attributedSats: forWithdrawal,
-            basisEur:
-              item.lot.pricePer !== null
-                ? (forWithdrawal / 1e8) * item.lot.pricePer
-                : null,
+            basisEur: item.lot.pricePer !== null ? (forWithdrawal / 1e8) * item.lot.pricePer : null,
           });
           withdrawalRemaining -= forWithdrawal;
         }
@@ -197,7 +196,7 @@ export async function fillMissingPrices(
 
   const result = new Map<string, KrakenWithdrawalAttribution>();
   for (const [key, attr] of attributions) {
-    const lots = attr.lots.map(al => {
+    const lots = attr.lots.map((al) => {
       if (al.lot.pricePer !== null) return al;
       const pricePer = fetchedPrices.get(al.lot.ledgerTxid) ?? 0;
       return {
@@ -219,7 +218,7 @@ export function krakenToLotRows(
   currency: DisplayCurrency,
   usdToEur: number
 ): LotRow[] {
-  return attr.lots.map(al => {
+  return attr.lots.map((al) => {
     const pricePer = al.lot.pricePer ?? 0;
     const basisEur = al.basisEur ?? 0;
     return {

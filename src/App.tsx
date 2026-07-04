@@ -3,7 +3,7 @@ import { useReactToPrint } from 'react-to-print';
 import UTXONode from './components/UTXONode';
 import BasisReport from './components/BasisReport';
 import { UTXONode as UTXONodeType } from './core/types';
-import { fetchNodeData, fetchChildNodes, fetchRawBtcUsd, fetchUsdToEurRate } from './api';
+import { fetchNodeData, fetchChildNodes, fetchRawBtcUsd, fetchUsdToEurRate, queue } from './api';
 import { collectLeaves, sumBasis, updateNode, findNode, nodePrice } from './core/tree';
 import { formatCurrency, APP_CONFIG, DisplayCurrency } from './config';
 import { TraceContext } from './TraceContext';
@@ -37,6 +37,7 @@ const App: React.FC = () => {
   const [selectedVout, setSelectedVout] = useState<number | null>(null);
   const [pendingOutputs, setPendingOutputs] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [queueStats, setQueueStats] = useState({ active: 0, pending: 0 });
   const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>(APP_CONFIG.CURRENCY);
   const reportRef = useRef<HTMLDivElement>(null);
   const pendingAutoExpand = useRef<string[]>([]);
@@ -71,6 +72,9 @@ const App: React.FC = () => {
     contentRef: reportRef,
     documentTitle: `BTC-Audit-${searchTxid.substring(0, 8)}`,
   });
+
+  // Progress UX for deep expansions: subscribe to the shared fetch queue.
+  useEffect(() => queue.onChange(setQueueStats), []);
 
   const handleInitialFetch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -227,12 +231,17 @@ const App: React.FC = () => {
     if (swanTransfersText && swanTradesText) {
       warnings.push('both trades and transfers detected (redundant): using transfers');
     }
-    if (swanTransfersText) {
-      swanLots = parseSwanTransfers(swanTransfersText);
-      swanLotSource = 'transfers';
-    } else if (swanTradesText) {
-      swanLots = parseSwanTrades(swanTradesText);
-      swanLotSource = 'trades';
+    try {
+      if (swanTransfersText) {
+        swanLots = parseSwanTransfers(swanTransfersText);
+        swanLotSource = 'transfers';
+      } else if (swanTradesText) {
+        swanLots = parseSwanTrades(swanTradesText);
+        swanLotSource = 'trades';
+      }
+    } catch (err) {
+      console.error('Swan CSV error:', err);
+      warnings.push('failed to parse Swan CSV — check file format');
     }
     const hasSwanLots = swanLots.length > 0;
     const hasSwanWithdrawals = !!swanWithdrawalsText;
@@ -473,6 +482,11 @@ const App: React.FC = () => {
           >
             {loading ? 'loading...' : '[trace]'}
           </button>
+          {(queueStats.active > 0 || queueStats.pending > 0) && (
+            <span style={{ color: 'var(--muted)', fontSize: 12, alignSelf: 'center' }}>
+              fetching {queueStats.active} of {queueStats.active + queueStats.pending}
+            </span>
+          )}
         </form>
 
         {/* Warnings */}

@@ -13,9 +13,9 @@ export interface SwanLot {
 }
 
 export interface SwanWithdrawal {
-  txid: string;   // Bitcoin txid — matches UTXONode.txid directly
+  txid: string; // Bitcoin txid — matches UTXONode.txid directly
   btcSats: number;
-  date: Date;     // Executed At (on-chain settlement time)
+  date: Date; // Executed At (on-chain settlement time)
 }
 
 export interface SwanAttributedLot {
@@ -64,25 +64,25 @@ function parseSwanDate(s: string): Date {
 // Trades CSV: infer price from Sent / Received quantities.
 export function parseSwanTrades(text: string): SwanLot[] {
   return parseCSV(text)
-    .filter(r => r['Received Currency'] === 'BTC' && r['Sent Currency'] === 'USD')
-    .map(r => {
-      const btc = parseFloat(r['Received Quantity']) || 0;
+    .filter((r) => r['Received Currency'] === 'BTC' && r['Sent Currency'] === 'USD')
+    .map((r) => {
+      const btcSats = parseBtcToSats(r['Received Quantity']);
       const usd = parseFloat(r['Sent Quantity']) || 0;
       return {
         date: parseTradeDate(r['Date']),
-        btcSats: parseBtcToSats(r['Received Quantity']),
-        priceUsd: btc > 0 ? usd / btc : 0,
+        btcSats,
+        priceUsd: btcSats > 0 ? usd / (btcSats / 1e8) : 0,
         source: 'trades' as const,
       };
     })
-    .filter(l => l.btcSats > 0);
+    .filter((l) => l.btcSats > 0);
 }
 
 // Transfers CSV: use explicit BTC Price field; only settled purchase rows.
 export function parseSwanTransfers(text: string): SwanLot[] {
   return parseCSV(text, SWAN_SKIP)
-    .filter(r => r['Event'] === 'purchase' && r['Status'] === 'settled')
-    .map(r => {
+    .filter((r) => r['Event'] === 'purchase' && r['Status'] === 'settled')
+    .map((r) => {
       const price = parseFloat(r['BTC Price']) || 0;
       return {
         date: parseSwanDate(r['Date']),
@@ -91,19 +91,19 @@ export function parseSwanTransfers(text: string): SwanLot[] {
         source: 'transfers' as const,
       };
     })
-    .filter(l => l.btcSats > 0 && l.priceUsd > 0);
+    .filter((l) => l.btcSats > 0 && l.priceUsd > 0);
 }
 
 // Withdrawals CSV: settled rows with a non-empty Bitcoin txid.
 export function parseSwanWithdrawals(text: string): SwanWithdrawal[] {
   return parseCSV(text, SWAN_SKIP)
-    .filter(r => r['Status'] === 'settled' && r['Transaction ID'].trim().length > 0)
-    .map(r => ({
+    .filter((r) => r['Status'] === 'settled' && r['Transaction ID'].trim().length > 0)
+    .map((r) => ({
       txid: r['Transaction ID'].trim(),
       btcSats: parseBtcToSats(r['Bitcoin Amount']),
       date: parseSwanDate(r['Executed At']),
     }))
-    .filter(w => w.btcSats > 0);
+    .filter((w) => w.btcSats > 0);
 }
 
 // FIFO attribution: assign purchase lots chronologically to each withdrawal.
@@ -116,7 +116,7 @@ export function buildSwanAttributions(
   const sortedLots = [...lots].sort((a, b) => a.date.getTime() - b.date.getTime());
   const sortedWithdrawals = [...withdrawals].sort((a, b) => a.date.getTime() - b.date.getTime());
 
-  const queue = sortedLots.map(lot => ({ lot, residualSats: lot.btcSats }));
+  const queue = sortedLots.map((lot) => ({ lot, residualSats: lot.btcSats }));
   const result = new Map<string, SwanWithdrawalAttribution>();
 
   for (const w of sortedWithdrawals) {
@@ -157,7 +157,7 @@ export function swanToLotRows(
   currency: DisplayCurrency,
   usdToEur: number
 ): LotRow[] {
-  return attr.lots.map(al => ({
+  return attr.lots.map((al) => ({
     date: al.date,
     btcSats: al.attributedSats,
     priceDisplay: currency === 'EUR' ? al.priceUsd * usdToEur : al.priceUsd,

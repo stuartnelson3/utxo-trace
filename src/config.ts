@@ -1,3 +1,5 @@
+import { roundCurrency } from './core/currency';
+
 export type DisplayCurrency = 'USD' | 'EUR';
 
 export const APP_CONFIG = {
@@ -10,8 +12,9 @@ const formatters: Record<DisplayCurrency, Intl.NumberFormat> = {
   EUR: new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }),
 };
 
+// Rounded once, explicitly, before formatting — see core/currency.ts for why.
 export const formatCurrency = (value: number, currency: DisplayCurrency = APP_CONFIG.CURRENCY) =>
-  formatters[currency].format(value);
+  formatters[currency].format(roundCurrency(value));
 
 export const dateFormatter = new Intl.DateTimeFormat(APP_CONFIG.DATE_LOCALE, {
   year: 'numeric',
