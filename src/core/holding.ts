@@ -1,6 +1,13 @@
-// §23 EStG: private disposal gains are tax-free when held for MORE than one year.
-// Uses calendar-accurate comparison so leap years are handled correctly.
-// "mehr als ein Jahr" means disposalDate must be strictly after the one-year anniversary.
+// Holding-period exemption: private disposal gains are tax-free when held
+// for MORE than one year. §23 Abs. 1 Nr. 2 EStG (Germany) and §1222/§1223
+// IRC (US, long-term vs. short-term) share the same day-count structure:
+// the period begins the day AFTER acquisition (§187 Abs. 1 BGB analog) and
+// runs for one year, expiring at the end of the calendar day one year later
+// that corresponds to the acquisition day (§188 Abs. 2 BGB). "More than one
+// year" therefore requires the disposal to fall on or after the day AFTER
+// that anniversary date — acquisition 2023-05-10 exempts only from
+// 2024-05-11 onward; any moment on 2024-05-10 itself is still within the
+// one-year period, not yet exempt.
 export function isPara23Exempt(acquisitionTs: number, disposalTs: number): boolean {
   // disposalTs === 0 is the "no disposal date set yet" sentinel (see
   // TraceContext's default). acquisitionTs is always a real block time in
@@ -9,7 +16,9 @@ export function isPara23Exempt(acquisitionTs: number, disposalTs: number): boole
   // treating it as "unset" was a real bug (caught by the property test
   // below at acquisitionTs=0).
   if (!disposalTs) return false;
-  const oneYearAfterAcq = new Date(acquisitionTs * 1000);
-  oneYearAfterAcq.setFullYear(oneYearAfterAcq.getFullYear() + 1);
-  return new Date(disposalTs * 1000) > oneYearAfterAcq;
+  const firstExemptDay = new Date(acquisitionTs * 1000);
+  firstExemptDay.setFullYear(firstExemptDay.getFullYear() + 1);
+  firstExemptDay.setDate(firstExemptDay.getDate() + 1);
+  firstExemptDay.setHours(0, 0, 0, 0);
+  return new Date(disposalTs * 1000) >= firstExemptDay;
 }

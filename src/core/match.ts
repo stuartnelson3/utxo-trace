@@ -1,4 +1,5 @@
 import { LedgerEntry } from './kraken';
+import { METHODOLOGY } from './methodology';
 
 export type AmountBasis = 'net' | 'net-minus-fee' | 'net-plus-fee';
 
@@ -34,13 +35,15 @@ export interface FindMatchCandidatesInput {
   opts?: { amountToleranceSats?: number; timeWindow?: TimeWindow };
 }
 
-export const DEFAULT_AMOUNT_TOLERANCE_SATS = 2;
+// Sourced from METHODOLOGY so the report's documented tolerance/window and
+// this code cannot drift apart.
+export const DEFAULT_AMOUNT_TOLERANCE_SATS = METHODOLOGY.matching.amountToleranceSats;
 // A withdrawal is initiated before it confirms on-chain, so the ledger entry
 // should precede the block; 72h covers slow confirmations, 1h covers minor
 // clock skew on the "shouldn't postdate" side.
 export const DEFAULT_TIME_WINDOW: TimeWindow = {
-  beforeMs: 72 * 3600 * 1000,
-  afterMs: 1 * 3600 * 1000,
+  beforeMs: METHODOLOGY.matching.timeWindowBeforeMs,
+  afterMs: METHODOLOGY.matching.timeWindowAfterMs,
 };
 
 function amountHit(

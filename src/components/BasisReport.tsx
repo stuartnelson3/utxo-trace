@@ -8,6 +8,8 @@ import { krakenToLotRows } from '../core/kraken';
 import { swanToLotRows } from '../core/swan';
 import LotTable from './LotTable';
 import Legend from './Legend';
+import { METHODOLOGY } from '../core/methodology';
+import pkg from '../../package.json';
 
 interface Props {
   rootNode: UTXONode;
@@ -410,6 +412,73 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Methodology appendix */}
+        <div style={{ marginBottom: 20 }}>
+          <div
+            style={{
+              fontWeight: 'bold',
+              borderBottom: '1px solid #000',
+              marginBottom: 8,
+              paddingBottom: 4,
+            }}
+          >
+            methodology
+          </div>
+          <div style={{ fontSize: 10, color: '#333', lineHeight: 1.6 }}>
+            <div>
+              <strong>price source:</strong> {METHODOLOGY.priceOracle.source};{' '}
+              {METHODOLOGY.priceOracle.snapRule}.
+            </div>
+            <div>
+              <strong>fx:</strong> {METHODOLOGY.fx.source}; {METHODOLOGY.fx.rule}.
+            </div>
+            <div>
+              <strong>attribution:</strong> {METHODOLOGY.attribution.rule},{' '}
+              {METHODOLOGY.attribution.scope}.
+            </div>
+            <div>
+              <strong>matching:</strong> {METHODOLOGY.matching.rule}.
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <strong>holding period (DE):</strong> {METHODOLOGY.holdingPeriod.rule_de}
+            </div>
+            <div>
+              <strong>holding period (US):</strong> {METHODOLOGY.holdingPeriod.rule_us}
+            </div>
+            <table style={{ marginTop: 8, borderCollapse: 'collapse' }}>
+              <tbody>
+                <tr>
+                  <td style={{ paddingRight: 8, color: '#060' }}>✓</td>
+                  <td style={{ paddingRight: 16 }}>{METHODOLOGY.provenanceTiers['trades-csv']}</td>
+                </tr>
+                <tr>
+                  <td style={{ paddingRight: 8, color: '#b60' }}>~</td>
+                  <td style={{ paddingRight: 16 }}>{METHODOLOGY.provenanceTiers.mempool}</td>
+                </tr>
+                <tr>
+                  <td style={{ paddingRight: 8 }}>mixed</td>
+                  <td style={{ paddingRight: 16 }}>{METHODOLOGY.provenanceTiers.mixed}</td>
+                </tr>
+                <tr>
+                  <td style={{ paddingRight: 8, color: '#b60' }}>!</td>
+                  <td style={{ paddingRight: 16 }}>{METHODOLOGY.provenanceTiers.override}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ marginTop: 8, color: '#999' }}>
+              methodology v{METHODOLOGY.version} · app v{pkg.version} · commit dev · generated{' '}
+              {new Date().toISOString()}
+              {disposalDate && (
+                <>
+                  {' '}
+                  · disposal {formatDate(new Date(disposalDate))}
+                  {disposalPriceDisplay != null && ` @ ${fmt(disposalPriceDisplay)}/BTC`}
+                </>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Legend */}

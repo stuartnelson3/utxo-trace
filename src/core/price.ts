@@ -1,9 +1,11 @@
 import type { DisplayCurrency } from '../config';
+import { METHODOLOGY } from './methodology';
 
 // mempool.space snapshots are ~daily at 16:00 UTC; timestamps outside that
 // window return -1 from the API. Falling back to the prior snapshot means
-// re-querying at this floored timestamp.
-export const SNAP_ANCHOR_UTC_HOUR = 16;
+// re-querying at this floored timestamp. Sourced from METHODOLOGY so the
+// report's documented snap rule and this code cannot drift apart.
+export const SNAP_ANCHOR_UTC_HOUR = METHODOLOGY.priceOracle.snapAnchorUtcHour;
 
 export function prevDailySnapshot(ts: number): number {
   return (
