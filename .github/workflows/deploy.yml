@@ -1,0 +1,80 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+        env:
+          VITE_COMMIT_SHA: ${{ github.sha }}
+      - name: Checksum dist
+        run: |
+          cd dist
+          find . -type f -exec sha256sum {} \; > ../dist-checksums.txt
+          cd ..
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-checksums
+          path: dist-checksums.txt
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  smoke-test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Wait for Pages to be live
+        env:
+          SMOKE_TEST_URL: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          for i in $(seq 1 12); do
+            curl -sSf "$SMOKE_TEST_URL" -o /dev/null && exit 0
+            sleep 5
+          done
+          echo "site did not become reachable in time" >&2
+          exit 1
+      - run: node scripts/smoke-test.mjs
+        env:
+          SMOKE_TEST_URL: ${{ needs.deploy.outputs.page_url }}
