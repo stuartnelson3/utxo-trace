@@ -1,19 +1,11 @@
-import { UTXONode } from './types';
+import { UTXONode } from './core/types';
+import { prevDailySnapshot, toDayKey } from './core/price';
 
 // mempool.space USD prices are reliable. EUR data has gaps, so we always fetch
 // USD and store the ECB rate separately. The display layer converts at render
 // time so the user can toggle currencies without re-fetching. See pricing-api.md.
 
 const eurRateCache = new Map<string, number>();
-
-function toDateString(ts: number): string {
-  return new Date(ts * 1000).toISOString().slice(0, 10);
-}
-
-// mempool.space snapshots are ~daily at 16:00 UTC; timestamps outside that
-// window return -1. Fall back to the nearest prior snapshot.
-const prevDailySnapshot = (ts: number) =>
-  Math.floor((ts - 16 * 3600) / 86400) * 86400 + 16 * 3600;
 
 async function fetchBtcUsd(ts: number): Promise<number> {
   const res = await fetch(
@@ -31,7 +23,7 @@ export async function fetchRawBtcUsd(ts: number): Promise<number> {
 }
 
 export async function fetchUsdToEurRate(ts: number): Promise<number> {
-  const date = toDateString(ts);
+  const date = toDayKey(ts);
   if (eurRateCache.has(date)) return eurRateCache.get(date)!;
   const res = await fetch(`https://api.frankfurter.dev/v1/${date}?from=USD&to=EUR`);
   if (!res.ok) throw new Error(`frankfurter error: ${res.statusText}`);
@@ -74,8 +66,6 @@ export async function fetchChildNodes(parentTxid: string): Promise<UTXONode[]> {
   if (!res.ok) throw new Error('Failed to fetch inputs');
   const txData = await res.json();
   return Promise.all(
-    txData.vin
-      .filter((inp: any) => inp.txid)
-      .map((inp: any) => fetchNodeData(inp.txid, inp.vout))
+    txData.vin.filter((inp: any) => inp.txid).map((inp: any) => fetchNodeData(inp.txid, inp.vout))
   );
 }

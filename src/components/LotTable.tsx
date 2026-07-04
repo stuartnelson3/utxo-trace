@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LotRow } from '../kraken';
+import { LotRow } from '../core/kraken';
 import { formatCurrency, formatDate, DisplayCurrency } from '../config';
 
 interface Props {

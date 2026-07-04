@@ -1,6 +1,7 @@
 import { parseCSV } from './csvUtils';
-import { DisplayCurrency } from './config';
+import { DisplayCurrency } from '../config';
 import { LotRow } from './kraken';
+import { parseBtcToSats } from './sats';
 
 export type SwanCsvType = 'swan-trades' | 'swan-transfers' | 'swan-withdrawals';
 
@@ -69,7 +70,7 @@ export function parseSwanTrades(text: string): SwanLot[] {
       const usd = parseFloat(r['Sent Quantity']) || 0;
       return {
         date: parseTradeDate(r['Date']),
-        btcSats: Math.round(btc * 1e8),
+        btcSats: parseBtcToSats(r['Received Quantity']),
         priceUsd: btc > 0 ? usd / btc : 0,
         source: 'trades' as const,
       };
@@ -82,11 +83,10 @@ export function parseSwanTransfers(text: string): SwanLot[] {
   return parseCSV(text, SWAN_SKIP)
     .filter(r => r['Event'] === 'purchase' && r['Status'] === 'settled')
     .map(r => {
-      const btc = parseFloat(r['Unit Count']) || 0;
       const price = parseFloat(r['BTC Price']) || 0;
       return {
         date: parseSwanDate(r['Date']),
-        btcSats: Math.round(btc * 1e8),
+        btcSats: parseBtcToSats(r['Unit Count']),
         priceUsd: price,
         source: 'transfers' as const,
       };
@@ -100,7 +100,7 @@ export function parseSwanWithdrawals(text: string): SwanWithdrawal[] {
     .filter(r => r['Status'] === 'settled' && r['Transaction ID'].trim().length > 0)
     .map(r => ({
       txid: r['Transaction ID'].trim(),
-      btcSats: Math.round((parseFloat(r['Bitcoin Amount']) || 0) * 1e8),
+      btcSats: parseBtcToSats(r['Bitcoin Amount']),
       date: parseSwanDate(r['Executed At']),
     }))
     .filter(w => w.btcSats > 0);

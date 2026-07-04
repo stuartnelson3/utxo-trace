@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { UTXONode as UTXONodeType } from '../types';
+import { UTXONode as UTXONodeType } from '../core/types';
 import { formatCurrency, formatDate } from '../config';
-import { nodePrice, isPara23Exempt } from '../utils';
+import { nodePrice } from '../core/tree';
+import { isPara23Exempt } from '../core/holding';
 import { useTraceContext } from '../TraceContext';
-import { findMatchingWithdrawal, krakenToLotRows } from '../kraken';
-import { swanToLotRows } from '../swan';
+import { krakenToLotRows } from '../core/kraken';
+import { swanToLotRows } from '../core/swan';
 import LotTable from './LotTable';
 
 interface Props {

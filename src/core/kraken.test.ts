@@ -4,9 +4,9 @@ import {
   parseKrakenLedger,
   parseKrakenTrades,
   buildAttributions,
-  findMatchingWithdrawal,
 } from './kraken';
-import { sumBasis, leafBasis, ScaledLeaf } from './utils';
+import { findMatchingWithdrawal } from './match';
+import { sumBasis, leafBasis, ScaledLeaf } from './tree';
 import { UTXONode } from './types';
 
 // ---------------------------------------------------------------------------

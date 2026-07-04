@@ -1,13 +1,14 @@
 import { UTXONode } from './types';
-import { DisplayCurrency } from './config';
+import { DisplayCurrency } from '../config';
+import { applyRate } from './price';
 
 // basisOverride stores the full (unscaled) basis for this node as computed
 // from exchange CSV data. usd is always present; eur is set when the exchange
 // provides EUR prices directly (Kraken trades CSV) to avoid a USD→EUR
 // conversion approximation. leafBasis applies the scaledSats ratio on top.
 export interface BasisOverride {
-  usd: number;   // full node basis in USD
-  eur?: number;  // full node basis in EUR, if known exactly
+  usd: number; // full node basis in USD
+  eur?: number; // full node basis in EUR, if known exactly
 }
 
 export interface ScaledLeaf {
@@ -19,7 +20,7 @@ export interface ScaledLeaf {
 // Price of one BTC at this node in the requested currency.
 export function nodePrice(node: UTXONode, currency: DisplayCurrency): number {
   const usd = node.isOverride ? (node.manualPriceUsd ?? 0) : node.priceBtcUsd;
-  return currency === 'EUR' ? usd * node.usdToEur : usd;
+  return applyRate(usd, currency, node.usdToEur);
 }
 
 // Basis for a single scaled leaf.
@@ -77,14 +78,4 @@ export function findNode(root: UTXONode, id: string): UTXONode | null {
     if (found) return found;
   }
   return null;
-}
-
-// §23 EStG: private disposal gains are tax-free when held for MORE than one year.
-// Uses calendar-accurate comparison so leap years are handled correctly.
-// "mehr als ein Jahr" means disposalDate must be strictly after the one-year anniversary.
-export function isPara23Exempt(acquisitionTs: number, disposalTs: number): boolean {
-  if (!disposalTs || !acquisitionTs) return false;
-  const oneYearAfterAcq = new Date(acquisitionTs * 1000);
-  oneYearAfterAcq.setFullYear(oneYearAfterAcq.getFullYear() + 1);
-  return new Date(disposalTs * 1000) > oneYearAfterAcq;
 }

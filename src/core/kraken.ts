@@ -1,5 +1,6 @@
 import { parseCSV } from './csvUtils';
-import { DisplayCurrency } from './config';
+import { DisplayCurrency } from '../config';
+import { classifyPriceSource } from './lots';
 
 export type PriceSource = 'trades-csv' | 'mempool';
 export type AttributionPriceSource = 'trades-csv' | 'mixed' | 'mempool';
@@ -84,9 +85,11 @@ export function parseKrakenTrades(text: string): Map<string, TradeEntry> {
 }
 
 function classifySource(lots: KrakenAttributedLot[]): AttributionPriceSource {
-  if (lots.every(l => l.lot.priceSource === 'trades-csv')) return 'trades-csv';
-  if (lots.every(l => l.lot.priceSource === 'mempool')) return 'mempool';
-  return 'mixed';
+  return classifyPriceSource(
+    lots.map((l) => l.lot.priceSource),
+    'trades-csv',
+    'mempool'
+  );
 }
 
 // FIFO attribution: processes all BTC ledger entries in order, consumes
@@ -206,17 +209,6 @@ export async function fillMissingPrices(
     result.set(key, { ...attr, lots, priceSource: classifySource(lots) });
   }
   return result;
-}
-
-// Find a withdrawal matching a UTXO leaf amount (within 2 sats tolerance).
-export function findMatchingWithdrawal(
-  attributions: Map<string, KrakenWithdrawalAttribution>,
-  leafAmountSats: number
-): KrakenWithdrawalAttribution | null {
-  for (const attr of attributions.values()) {
-    if (Math.abs(attr.withdrawalAmountSats - leafAmountSats) <= 2) return attr;
-  }
-  return null;
 }
 
 // Convert a Kraken attribution to generic LotRow[] for rendering in LotTable.

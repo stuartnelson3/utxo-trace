@@ -1,10 +1,11 @@
 import React, { forwardRef } from 'react';
-import { UTXONode } from '../types';
-import { ScaledLeaf, nodePrice, leafBasis, isPara23Exempt } from '../utils';
+import { UTXONode } from '../core/types';
+import { ScaledLeaf, nodePrice, leafBasis } from '../core/tree';
+import { isPara23Exempt } from '../core/holding';
 import { formatDate, formatCurrency } from '../config';
 import { useTraceContext } from '../TraceContext';
-import { krakenToLotRows } from '../kraken';
-import { swanToLotRows } from '../swan';
+import { krakenToLotRows } from '../core/kraken';
+import { swanToLotRows } from '../core/swan';
 import LotTable from './LotTable';
 
 interface Props {

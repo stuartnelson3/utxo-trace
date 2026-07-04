@@ -2,20 +2,20 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import UTXONode from './components/UTXONode';
 import BasisReport from './components/BasisReport';
-import { UTXONode as UTXONodeType } from './types';
+import { UTXONode as UTXONodeType } from './core/types';
 import { fetchNodeData, fetchChildNodes, fetchRawBtcUsd, fetchUsdToEurRate } from './api';
-import { collectLeaves, sumBasis, updateNode, findNode, nodePrice } from './utils';
+import { collectLeaves, sumBasis, updateNode, findNode, nodePrice } from './core/tree';
 import { formatCurrency, APP_CONFIG, DisplayCurrency } from './config';
 import { TraceContext } from './TraceContext';
+import { findMatchingWithdrawal } from './core/match';
 import {
   detectCsvType,
   parseKrakenLedger,
   parseKrakenTrades,
   buildAttributions,
   fillMissingPrices,
-  findMatchingWithdrawal,
   KrakenWithdrawalAttribution,
-} from './kraken';
+} from './core/kraken';
 import {
   detectSwanCsvType,
   parseSwanTrades,
@@ -24,7 +24,7 @@ import {
   buildSwanAttributions,
   SwanWithdrawalAttribution,
   SwanLot,
-} from './swan';
+} from './core/swan';
 
 const App: React.FC = () => {
   const [rootNode, setRootNode] = useState<UTXONodeType | null>(null);

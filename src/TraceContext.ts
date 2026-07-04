@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import { DisplayCurrency } from './config';
-import { KrakenWithdrawalAttribution } from './kraken';
-import { SwanWithdrawalAttribution } from './swan';
+import { KrakenWithdrawalAttribution } from './core/kraken';
+import { SwanWithdrawalAttribution } from './core/swan';
 
 interface TraceContextValue {
   displayCurrency: DisplayCurrency;
