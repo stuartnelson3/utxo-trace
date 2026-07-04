@@ -1,16 +1,141 @@
-import { KrakenWithdrawalAttribution } from './kraken';
+import { LedgerEntry } from './kraken';
 
-// Find a withdrawal matching a UTXO leaf amount (within 2 sats tolerance).
-// Amount-only, first-match: collides on equal amounts and can't tell a
-// network/exchange fee apart from a mismatch. Task 3 replaces this with a
-// fee-aware, time-windowed candidate finder that never auto-selects among
-// ambiguous candidates.
-export function findMatchingWithdrawal(
-  attributions: Map<string, KrakenWithdrawalAttribution>,
-  leafAmountSats: number
-): KrakenWithdrawalAttribution | null {
-  for (const attr of attributions.values()) {
-    if (Math.abs(attr.withdrawalAmountSats - leafAmountSats) <= 2) return attr;
+export type AmountBasis = 'net' | 'net-minus-fee' | 'net-plus-fee';
+
+export interface MatchCandidate {
+  refid: string; // ledger row identity — matches are stored by refid, not amount
+  ledgerTxid: string;
+  withdrawalSats: number; // |amount| from ledger, in sats
+  feeSats: number;
+  time: Date; // ledger timestamp (UTC)
+  amountBasis: AmountBasis; // which fee interpretation produced the hit
+  amountDeltaSats: number; // |expected - nodeSats| for that basis
+  timeDeltaMs: number; // |ledgerTime - nodeBlockTime|; Infinity if unverified
+  timeVerified: boolean; // false when nodeBlockTime is unknown (R2 skipped)
+}
+
+// A user-confirmed match, persisted by refid. amountBasis travels with it so
+// the report can disclose when the match wasn't an exact net-amount hit.
+export interface KrakenMatch {
+  refid: string;
+  amountBasis: AmountBasis;
+}
+
+export interface TimeWindow {
+  beforeMs: number; // how far before nodeBlockTime a ledger entry may be
+  afterMs: number; // how far after nodeBlockTime a ledger entry may be
+}
+
+export interface FindMatchCandidatesInput {
+  nodeSats: number;
+  nodeBlockTime: Date | null;
+  ledger: LedgerEntry[];
+  alreadyMatchedRefids: Set<string>;
+  opts?: { amountToleranceSats?: number; timeWindow?: TimeWindow };
+}
+
+export const DEFAULT_AMOUNT_TOLERANCE_SATS = 2;
+// A withdrawal is initiated before it confirms on-chain, so the ledger entry
+// should precede the block; 72h covers slow confirmations, 1h covers minor
+// clock skew on the "shouldn't postdate" side.
+export const DEFAULT_TIME_WINDOW: TimeWindow = {
+  beforeMs: 72 * 3600 * 1000,
+  afterMs: 1 * 3600 * 1000,
+};
+
+function amountHit(
+  withdrawalSats: number,
+  feeSats: number,
+  nodeSats: number,
+  toleranceSats: number
+): { basis: AmountBasis; delta: number } | null {
+  const bases: Array<{ basis: AmountBasis; expected: number }> = [
+    { basis: 'net', expected: withdrawalSats },
+    { basis: 'net-minus-fee', expected: withdrawalSats - feeSats },
+    { basis: 'net-plus-fee', expected: withdrawalSats + feeSats },
+  ];
+  let best: { basis: AmountBasis; delta: number } | null = null;
+  for (const { basis, expected } of bases) {
+    const delta = Math.abs(expected - nodeSats);
+    if (delta <= toleranceSats && (!best || delta < best.delta)) {
+      best = { basis, delta };
+    }
   }
-  return null;
+  return best;
+}
+
+// Deterministic, fee-aware, time-windowed candidate finder. Never picks a
+// winner among ambiguous candidates itself — that's a UI decision, recorded
+// explicitly by the user and persisted by refid (see MatchCandidate.refid).
+export function findMatchCandidates(input: FindMatchCandidatesInput): MatchCandidate[] {
+  const { nodeSats, nodeBlockTime, ledger, alreadyMatchedRefids } = input;
+  const toleranceSats = input.opts?.amountToleranceSats ?? DEFAULT_AMOUNT_TOLERANCE_SATS;
+  const timeWindow = input.opts?.timeWindow ?? DEFAULT_TIME_WINDOW;
+
+  const candidates: MatchCandidate[] = [];
+
+  for (const entry of ledger) {
+    if (entry.type !== 'withdrawal' || entry.amountSats >= 0) continue;
+    if (alreadyMatchedRefids.has(entry.refid)) continue;
+
+    const withdrawalSats = Math.abs(entry.amountSats);
+    const hit = amountHit(withdrawalSats, entry.feeSats, nodeSats, toleranceSats);
+    if (!hit) continue;
+
+    let timeVerified = false;
+    let timeDeltaMs = Infinity;
+    if (nodeBlockTime) {
+      const lower = nodeBlockTime.getTime() - timeWindow.beforeMs;
+      const upper = nodeBlockTime.getTime() + timeWindow.afterMs;
+      const t = entry.time.getTime();
+      if (t < lower || t > upper) continue;
+      timeVerified = true;
+      timeDeltaMs = Math.abs(t - nodeBlockTime.getTime());
+    }
+
+    candidates.push({
+      refid: entry.refid,
+      ledgerTxid: entry.txid,
+      withdrawalSats,
+      feeSats: entry.feeSats,
+      time: entry.time,
+      amountBasis: hit.basis,
+      amountDeltaSats: hit.delta,
+      timeDeltaMs,
+      timeVerified,
+    });
+  }
+
+  const basisRank: Record<AmountBasis, number> = { net: 0, 'net-minus-fee': 1, 'net-plus-fee': 1 };
+  return candidates.sort((a, b) => {
+    if (a.amountDeltaSats !== b.amountDeltaSats) return a.amountDeltaSats - b.amountDeltaSats;
+    const rank = basisRank[a.amountBasis] - basisRank[b.amountBasis];
+    if (rank !== 0) return rank;
+    return a.timeDeltaMs - b.timeDeltaMs;
+  });
+}
+
+// For the zero-candidates UI hint: the closest unmatched withdrawal by
+// amount, ignoring tolerance and the time window entirely, so the user can
+// diagnose a fee-basis or CSV mismatch instead of just seeing "no match".
+export function findNearestMiss(
+  nodeSats: number,
+  ledger: LedgerEntry[],
+  alreadyMatchedRefids: Set<string>
+): { refid: string; amountDeltaSats: number } | null {
+  let best: { refid: string; amountDeltaSats: number } | null = null;
+  for (const entry of ledger) {
+    if (entry.type !== 'withdrawal' || entry.amountSats >= 0) continue;
+    if (alreadyMatchedRefids.has(entry.refid)) continue;
+    const withdrawalSats = Math.abs(entry.amountSats);
+    const deltas = [
+      withdrawalSats,
+      withdrawalSats - entry.feeSats,
+      withdrawalSats + entry.feeSats,
+    ].map((expected) => Math.abs(expected - nodeSats));
+    const delta = Math.min(...deltas);
+    if (!best || delta < best.amountDeltaSats)
+      best = { refid: entry.refid, amountDeltaSats: delta };
+  }
+  return best;
 }

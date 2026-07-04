@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { detectCsvType, parseKrakenLedger, parseKrakenTrades, buildAttributions } from './kraken';
-import { findMatchingWithdrawal } from './match';
 import { sumBasis, leafBasis, ScaledLeaf } from './tree';
 import { UTXONode } from './types';
 
@@ -338,47 +337,9 @@ describe('buildAttributions', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. findMatchingWithdrawal
-// ---------------------------------------------------------------------------
-
-describe('findMatchingWithdrawal', () => {
-  // Build a minimal set of attributions for matching tests
-  function makeAttrs(withdrawalBtc: number) {
-    const ledger = parseKrakenLedger(
-      [
-        LEDGER_HEADER,
-        ledgerRow('L1', 'T1', '2023-01-01 00:00:00', 'trade', withdrawalBtc, 0, withdrawalBtc),
-        ledgerRow('LW', 'AW', '2023-02-01 00:00:00', 'withdrawal', -withdrawalBtc, 0, 0),
-      ].join('\n')
-    );
-    return buildAttributions(ledger, new Map());
-  }
-
-  it('returns the attribution for an exact sats match', () => {
-    const attrs = makeAttrs(0.5);
-    const result = findMatchingWithdrawal(attrs, 50_000_000);
-    expect(result).not.toBeNull();
-    expect(result!.withdrawalAmountSats).toBe(50_000_000);
-  });
-
-  it('matches within 2-sat tolerance', () => {
-    const attrs = makeAttrs(0.5); // 50_000_000 sats
-    expect(findMatchingWithdrawal(attrs, 50_000_001)).not.toBeNull();
-    expect(findMatchingWithdrawal(attrs, 49_999_999)).not.toBeNull();
-    expect(findMatchingWithdrawal(attrs, 50_000_002)).not.toBeNull();
-  });
-
-  it('returns null when more than 2 sats off', () => {
-    const attrs = makeAttrs(0.5);
-    expect(findMatchingWithdrawal(attrs, 50_000_003)).toBeNull();
-    expect(findMatchingWithdrawal(attrs, 49_999_997)).toBeNull();
-  });
-
-  it('returns null when no withdrawals loaded', () => {
-    expect(findMatchingWithdrawal(new Map(), 50_000_000)).toBeNull();
-  });
-});
+// findMatchingWithdrawal (amount-only matching) is removed as of task 3 —
+// see core/match.ts / core/match.test.ts for its fee-aware, time-windowed,
+// never-auto-selecting replacement.
 
 // ---------------------------------------------------------------------------
 // 6. sumBasis with krakenAttribution

@@ -39,6 +39,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
       disposalPriceDisplay,
       krakenAttributions,
       krakenMatches,
+      krakenRefidIndex,
       swanAttributions,
     } = useTraceContext();
     const fmt = (val: number) => formatCurrency(val, displayCurrency);
@@ -156,9 +157,12 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
             // Look up attribution for lot table rendering (mirrors UTXONode logic).
             // Swan: automatic by txid. Kraken: explicit by user-confirmed match.
             const swanAttr = swanAttributions.get(node.txid) ?? null;
-            const krakenWithdrawalTxid = !swanAttr ? krakenMatches.get(node.id) : undefined;
-            const krakenAttr = krakenWithdrawalTxid
-              ? (krakenAttributions.get(krakenWithdrawalTxid) ?? null)
+            const krakenMatch = !swanAttr ? krakenMatches.get(node.id) : undefined;
+            const krakenLedgerTxid = krakenMatch
+              ? krakenRefidIndex.get(krakenMatch.refid)
+              : undefined;
+            const krakenAttr = krakenLedgerTxid
+              ? (krakenAttributions.get(krakenLedgerTxid) ?? null)
               : null;
             const lotRows = krakenAttr
               ? krakenToLotRows(krakenAttr, displayCurrency, node.usdToEur)
@@ -167,6 +171,11 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
                 : null;
             const lotLabel = krakenAttr ? 'kraken / fifo' : 'swan / fifo';
             const lotTotal = lotRows ? lotRows.reduce((s, r) => s + r.basisDisplay, 0) : 0;
+            // Disclose the match basis whenever it wasn't an exact net-amount hit.
+            const matchDisclosure =
+              krakenAttr && krakenMatch && krakenMatch.amountBasis !== 'net'
+                ? `matched to ledger refid ${krakenMatch.refid} (amount ${krakenMatch.amountBasis === 'net-minus-fee' ? 'net of' : 'gross of'} withdrawal fee)`
+                : null;
             // Ratio of this UTXO's proportional share vs the full node.
             const ratio = node.amountSats > 0 ? scaledSats / node.amountSats : 1;
             const isPartial = lotRows !== null && Math.abs(ratio - 1) > 0.0001;
@@ -214,6 +223,11 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
                 </div>
                 {lotRows && (
                   <div style={{ marginTop: 8, paddingLeft: 12, borderLeft: '2px solid #ddd' }}>
+                    {matchDisclosure && (
+                      <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>
+                        {matchDisclosure}
+                      </div>
+                    )}
                     <LotTable
                       label={lotLabel}
                       rows={lotRows}

@@ -6,7 +6,13 @@ import { isPara23Exempt } from '../core/holding';
 import { useTraceContext } from '../TraceContext';
 import { krakenToLotRows } from '../core/kraken';
 import { swanToLotRows } from '../core/swan';
+import { MatchCandidate } from '../core/match';
 import LotTable from './LotTable';
+
+interface FindCandidatesResult {
+  candidates: MatchCandidate[];
+  nearestMiss: { refid: string; amountDeltaSats: number } | null;
+}
 
 interface Props {
   node: UTXONodeType;
@@ -15,9 +21,21 @@ interface Props {
   onCollapse: (id: string) => void;
   onRemoveBranch: (id: string) => void;
   onNodeUpdate: (id: string, patch: Partial<UTXONodeType>) => void;
-  onMatchKraken?: (nodeId: string, amountSats: number) => boolean;
+  onFindKrakenCandidates?: (
+    nodeId: string,
+    amountSats: number,
+    blockTimeSec: number
+  ) => FindCandidatesResult;
+  onConfirmKrakenMatch?: (nodeId: string, candidate: MatchCandidate) => void;
   onRemoveKraken?: (nodeId: string) => void;
   isLastSibling?: boolean;
+}
+
+function describeCandidate(c: MatchCandidate): string {
+  const date = formatDate(c.time);
+  const btc = (c.withdrawalSats / 1e8).toFixed(8);
+  const basisNote = c.amountBasis === 'net' ? '' : ` (${c.amountBasis.replace('-', ' ')})`;
+  return `${date} ${btc} BTC refid ${c.refid}${basisNote}`;
 }
 
 const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
@@ -48,7 +66,8 @@ const UTXONode: React.FC<Props> = ({
   onCollapse,
   onRemoveBranch,
   onNodeUpdate,
-  onMatchKraken,
+  onFindKrakenCandidates,
+  onConfirmKrakenMatch,
   onRemoveKraken,
   isLastSibling,
 }) => {
@@ -57,12 +76,19 @@ const UTXONode: React.FC<Props> = ({
     disposalTimestamp,
     krakenAttributions,
     krakenMatches,
+    krakenRefidIndex,
     swanAttributions,
   } = useTraceContext();
-  // Look up this node's explicit Kraken match from the shared context map.
-  const matchedKrakenTxid = krakenMatches.get(node.id);
+  // Look up this node's confirmed Kraken match from the shared context map.
+  const matchedKraken = krakenMatches.get(node.id);
+  const matchedLedgerTxid = matchedKraken ? krakenRefidIndex.get(matchedKraken.refid) : undefined;
   const [isEditing, setIsEditing] = useState(false);
-  const [krakenNoMatch, setKrakenNoMatch] = useState(false);
+  // Candidates found by the last [match kraken] click; null = not searched
+  // yet, [] = searched and found nothing.
+  const [pendingCandidates, setPendingCandidates] = useState<MatchCandidate[] | null>(null);
+  const [nearestMiss, setNearestMiss] = useState<{ refid: string; amountDeltaSats: number } | null>(
+    null
+  );
 
   const isExpanded = expandedIds.has(node.id);
   const price = nodePrice(node, displayCurrency);
@@ -72,17 +98,21 @@ const UTXONode: React.FC<Props> = ({
   // Swan: exact txid match (always automatic — txid is unambiguous).
   const swanAttr = swanAttributions.get(node.txid) ?? null;
 
-  // Kraken: explicit user match (amount-based matching is ambiguous;
-  // user clicks [match kraken] to assign this node to a withdrawal).
+  // Kraken: explicit user match, confirmed from a candidate list (never
+  // auto-selected — see core/match.ts).
   const krakenAttr = useMemo(
-    () => (matchedKrakenTxid ? (krakenAttributions.get(matchedKrakenTxid) ?? null) : null),
-    [matchedKrakenTxid, krakenAttributions]
+    () => (matchedLedgerTxid ? (krakenAttributions.get(matchedLedgerTxid) ?? null) : null),
+    [matchedLedgerTxid, krakenAttributions]
   );
 
   // Show [match kraken] button when Kraken CSV is loaded, this node has no match yet,
   // and the node is not expanded (expanded nodes are intermediate, not leaves).
   const showMatchBtn =
-    krakenAttributions.size > 0 && !krakenAttr && !swanAttr && !isExpanded && !!onMatchKraken;
+    krakenAttributions.size > 0 &&
+    !krakenAttr &&
+    !swanAttr &&
+    !isExpanded &&
+    !!onFindKrakenCandidates;
 
   const lotRows = useMemo(() => {
     if (krakenAttr) return krakenToLotRows(krakenAttr, displayCurrency, node.usdToEur);
@@ -160,7 +190,13 @@ const UTXONode: React.FC<Props> = ({
               basis: <strong>{formatCurrency(nodeBasis, displayCurrency)}</strong>
             </span>
             {krakenAttr && (
-              <span style={{ color: 'var(--muted)', fontSize: 12 }}>(overridden by kraken)</span>
+              <span style={{ color: 'var(--muted)', fontSize: 12 }}>
+                (overridden by kraken
+                {matchedKraken && matchedKraken.amountBasis !== 'net'
+                  ? `, ${matchedKraken.amountBasis.replace('-', ' ')}`
+                  : ''}
+                )
+              </span>
             )}
           </div>
 
@@ -197,16 +233,19 @@ const UTXONode: React.FC<Props> = ({
             {showMatchBtn && (
               <Btn
                 onClick={() => {
-                  const found = onMatchKraken!(node.id, node.amountSats);
-                  setKrakenNoMatch(!found);
+                  const result = onFindKrakenCandidates!(node.id, node.amountSats, node.timestamp);
+                  setPendingCandidates(result.candidates);
+                  setNearestMiss(result.nearestMiss);
                 }}
               >
                 [match kraken]
               </Btn>
             )}
-            {krakenNoMatch && !krakenAttr && !swanAttr && (
+            {pendingCandidates && pendingCandidates.length === 0 && !krakenAttr && !swanAttr && (
               <span style={{ color: 'var(--taxable)', fontSize: 12 }}>
                 no match for {(node.amountSats / 1e8).toFixed(8)} BTC
+                {nearestMiss &&
+                  ` — nearest: refid ${nearestMiss.refid} (Δ${nearestMiss.amountDeltaSats} sats)`}
               </span>
             )}
             {krakenAttr && onRemoveKraken && (
@@ -216,6 +255,47 @@ const UTXONode: React.FC<Props> = ({
             )}
             {node.memo && <span style={{ color: 'var(--muted)', fontSize: 12 }}>{node.memo}</span>}
           </div>
+
+          {/* Kraken match candidates — one requires a single [confirm] click,
+              several require an explicit pick; never pre-selected. */}
+          {pendingCandidates && pendingCandidates.length > 0 && (
+            <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+              {pendingCandidates.length > 1 && (
+                <div style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 4 }}>
+                  {pendingCandidates.length} withdrawals match — choose one:
+                </div>
+              )}
+              {pendingCandidates.map((c) => (
+                <div
+                  key={c.refid}
+                  style={{
+                    fontSize: 12,
+                    marginBottom: 4,
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'baseline',
+                  }}
+                >
+                  <span>
+                    {pendingCandidates!.length === 1 ? 'match: ' : ''}
+                    {describeCandidate(c)}
+                    {!c.timeVerified && (
+                      <span style={{ color: 'var(--muted)' }}> (time unverified)</span>
+                    )}
+                  </span>
+                  <Btn
+                    onClick={() => {
+                      onConfirmKrakenMatch!(node.id, c);
+                      setPendingCandidates(null);
+                      setNearestMiss(null);
+                    }}
+                  >
+                    {pendingCandidates!.length === 1 ? '[confirm]' : '[choose]'}
+                  </Btn>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* lot table — shown when attribution is set (Swan automatic, Kraken explicit) */}
           {lotRows && (
@@ -309,7 +389,8 @@ const UTXONode: React.FC<Props> = ({
               onCollapse={onCollapse}
               onRemoveBranch={onRemoveBranch}
               onNodeUpdate={onNodeUpdate}
-              onMatchKraken={onMatchKraken}
+              onFindKrakenCandidates={onFindKrakenCandidates}
+              onConfirmKrakenMatch={onConfirmKrakenMatch}
               onRemoveKraken={onRemoveKraken}
               isLastSibling={idx === node.children.length - 1}
             />

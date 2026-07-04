@@ -7,7 +7,7 @@ import { fetchNodeData, fetchChildNodes, fetchRawBtcUsd, fetchUsdToEurRate, queu
 import { collectLeaves, sumBasis, updateNode, findNode, nodePrice } from './core/tree';
 import { formatCurrency, APP_CONFIG, DisplayCurrency } from './config';
 import { TraceContext } from './TraceContext';
-import { findMatchingWithdrawal } from './core/match';
+import { findMatchCandidates, findNearestMiss, MatchCandidate, KrakenMatch } from './core/match';
 import {
   detectCsvType,
   parseKrakenLedger,
@@ -15,6 +15,7 @@ import {
   buildAttributions,
   fillMissingPrices,
   KrakenWithdrawalAttribution,
+  LedgerEntry,
 } from './core/kraken';
 import {
   detectSwanCsvType,
@@ -44,13 +45,27 @@ const App: React.FC = () => {
   const csvFileRef = useRef<HTMLInputElement>(null);
   const disposalPriceRef = useRef<HTMLInputElement>(null);
 
-  // Kraken state — explicit user matching (amount-based, so must be user-confirmed)
+  // Kraken state — explicit user matching (candidates can be ambiguous, so
+  // the user always confirms; matches are persisted by refid, not amount).
+  const [krakenLedger, setKrakenLedger] = useState<LedgerEntry[]>([]);
   const [krakenAttributions, setKrakenAttributions] = useState<Map<
     string,
     KrakenWithdrawalAttribution
   > | null>(null);
-  // Map: nodeId → withdrawal ledger txid (user-confirmed match)
-  const [krakenMatches, setKrakenMatches] = useState<Map<string, string>>(new Map());
+  // Map: nodeId → confirmed match. Keyed by refid (the ledger row identity);
+  // amountBasis travels with it so the report can disclose a non-exact match.
+  const [krakenMatches, setKrakenMatches] = useState<Map<string, KrakenMatch>>(new Map());
+
+  // refid -> ledgerTxid, so a refid-keyed match can look up its
+  // krakenAttributions entry (which stays keyed by ledgerTxid — buildAttributions
+  // and its existing tests are unaffected by the refid-based matcher).
+  const krakenRefidIndex = useMemo(() => {
+    const index = new Map<string, string>();
+    for (const entry of krakenLedger) {
+      if (entry.type === 'withdrawal') index.set(entry.refid, entry.txid);
+    }
+    return index;
+  }, [krakenLedger]);
 
   // Swan state — automatic matching via Bitcoin txid (exact, no ambiguity)
   const [swanAttributions, setSwanAttributions] = useState<Map<
@@ -152,16 +167,35 @@ const App: React.FC = () => {
     setRootNode((prev) => (prev ? updateNode(prev, nodeId, (n) => ({ ...n, ...patch })) : null));
   };
 
-  // Explicit Kraken matching (user-triggered): find by amount, record nodeId → withdrawalTxid.
-  // Returns true if a match was found, false otherwise (so UTXONode can show feedback).
-  const handleMatchKraken = (nodeId: string, amountSats: number): boolean => {
-    if (!krakenAttributions) return false;
-    const found = findMatchingWithdrawal(krakenAttributions, amountSats);
-    if (found) {
-      setKrakenMatches((prev) => new Map([...prev, [nodeId, found.ledgerTxid]]));
-      return true;
-    }
-    return false;
+  // Fee-aware, time-windowed candidate search (never auto-selects among
+  // ambiguous candidates — that's a UI decision, made explicit below).
+  const handleFindKrakenCandidates = (
+    nodeId: string,
+    amountSats: number,
+    blockTimeSec: number
+  ): {
+    candidates: MatchCandidate[];
+    nearestMiss: { refid: string; amountDeltaSats: number } | null;
+  } => {
+    const alreadyMatchedRefids = new Set(
+      [...krakenMatches.entries()].filter(([id]) => id !== nodeId).map(([, m]) => m.refid)
+    );
+    const candidates = findMatchCandidates({
+      nodeSats: amountSats,
+      nodeBlockTime: blockTimeSec ? new Date(blockTimeSec * 1000) : null,
+      ledger: krakenLedger,
+      alreadyMatchedRefids,
+    });
+    const nearestMiss =
+      candidates.length === 0
+        ? findNearestMiss(amountSats, krakenLedger, alreadyMatchedRefids)
+        : null;
+    return { candidates, nearestMiss };
+  };
+
+  const handleConfirmKrakenMatch = (nodeId: string, candidate: MatchCandidate) => {
+    const match: KrakenMatch = { refid: candidate.refid, amountBasis: candidate.amountBasis };
+    setKrakenMatches((prev) => new Map([...prev, [nodeId, match]]));
   };
 
   const handleRemoveKraken = (nodeId: string) => {
@@ -216,6 +250,7 @@ const App: React.FC = () => {
         const trades = krakenTradesText ? parseKrakenTrades(krakenTradesText) : new Map();
         const raw = buildAttributions(ledger, trades);
         const filled = await fillMissingPrices(raw, fetchRawBtcUsd, fetchUsdToEurRate);
+        setKrakenLedger(ledger);
         setKrakenAttributions(filled);
         setKrakenMatches(new Map()); // clear stale matches when CSV reloaded
         setKrakenSummary(krakenTradesText ? 'ledger + trades' : 'ledger');
@@ -325,9 +360,10 @@ const App: React.FC = () => {
         if (attr) return { ...leaf, basisOverride: { usd: attr.totalBasisUsd } };
       }
       if (krakenAttributions && krakenMatches.size > 0) {
-        const withdrawalTxid = krakenMatches.get(leaf.node.id);
-        if (withdrawalTxid) {
-          const attr = krakenAttributions.get(withdrawalTxid);
+        const match = krakenMatches.get(leaf.node.id);
+        const ledgerTxid = match ? krakenRefidIndex.get(match.refid) : undefined;
+        if (ledgerTxid) {
+          const attr = krakenAttributions.get(ledgerTxid);
           if (attr) {
             const basisEur = attr.lots.reduce((s, l) => s + (l.basisEur ?? 0), 0);
             return {
@@ -339,7 +375,7 @@ const App: React.FC = () => {
       }
       return leaf;
     });
-  }, [leaves, krakenAttributions, krakenMatches, swanAttributions]);
+  }, [leaves, krakenAttributions, krakenMatches, krakenRefidIndex, swanAttributions]);
 
   const totalBasis = useMemo(
     () => sumBasis(leavesWithAttribution, displayCurrency),
@@ -365,6 +401,7 @@ const App: React.FC = () => {
       disposalPriceDisplay: disposalPriceNum,
       krakenAttributions: krakenAttributions ?? new Map(),
       krakenMatches,
+      krakenRefidIndex,
       swanAttributions: swanAttributions ?? new Map(),
     }),
     [
@@ -374,6 +411,7 @@ const App: React.FC = () => {
       disposalPriceNum,
       krakenAttributions,
       krakenMatches,
+      krakenRefidIndex,
       swanAttributions,
     ]
   );
@@ -654,7 +692,8 @@ const App: React.FC = () => {
               onCollapse={handleCollapse}
               onRemoveBranch={handleRemoveBranch}
               onNodeUpdate={handleNodeUpdate}
-              onMatchKraken={handleMatchKraken}
+              onFindKrakenCandidates={handleFindKrakenCandidates}
+              onConfirmKrakenMatch={handleConfirmKrakenMatch}
               onRemoveKraken={handleRemoveKraken}
             />
           </>
