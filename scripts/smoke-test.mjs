@@ -4,11 +4,19 @@ const baseUrl = process.env.SMOKE_TEST_URL ?? 'http://localhost:5179';
 // Block 800000 tx — July 2023, has real EUR price data
 const txid = 'd41f5de48325e79070ccd3a23005f7a3b405f3ce1faa4df09f6d71770497e9d5';
 
+// stuartnelson.xyz is fronted by Cloudflare, which auto-injects a Web
+// Analytics beacon into every page it serves regardless of app code; our CSP
+// (script-src 'self') correctly blocks it, but the resulting console error
+// is expected noise on the deployed domain, not a real app regression.
+const KNOWN_NOISE = [/static\.cloudflareinsights\.com\/beacon/];
+
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 const page = await browser.newPage();
 const errors = [];
 page.on('console', (m) => {
-  if (m.type() === 'error') errors.push(m.text());
+  if (m.type() === 'error' && !KNOWN_NOISE.some((re) => re.test(m.text()))) {
+    errors.push(m.text());
+  }
 });
 
 try {
