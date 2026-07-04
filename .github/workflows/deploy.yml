@@ -4,13 +4,8 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 concurrency:
-  group: pages
+  group: blog-deploy
   cancel-in-progress: false
 
 jobs:
@@ -36,27 +31,51 @@ jobs:
         with:
           name: dist-checksums
           path: dist-checksums.txt
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
+          name: dist
           path: dist
 
-  deploy:
+  publish:
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    outputs:
-      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Checkout blog repo
+        uses: actions/checkout@v4
+        with:
+          repository: stuartnelson3/stuartnelson3.github.io
+          token: ${{ secrets.BLOG_DEPLOY_TOKEN }}
+          path: blog
+      - name: Sync dist into blog repo
+        # static/ is Hugo's source tree (publishDir=docs copies it verbatim on
+        # the next `hugo build`); docs/ is what GitHub Pages actually serves.
+        # Both must be updated so a future full Hugo rebuild doesn't diverge.
+        run: |
+          rm -rf blog/static/utxo-trace blog/docs/utxo-trace
+          mkdir -p blog/static/utxo-trace blog/docs/utxo-trace
+          cp -r dist/. blog/static/utxo-trace/
+          cp -r dist/. blog/docs/utxo-trace/
+      - name: Commit and push if changed
+        working-directory: blog
+        run: |
+          git config user.name "utxo-trace-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add static/utxo-trace docs/utxo-trace
+          if git diff --cached --quiet; then
+            echo "no changes to deploy"
+            exit 0
+          fi
+          git commit -m "deploy utxo-trace @ ${GITHUB_SHA}"
+          git push origin master
 
   smoke-test:
-    needs: deploy
+    needs: publish
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,16 +84,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - name: Wait for Pages to be live
-        env:
-          SMOKE_TEST_URL: ${{ needs.deploy.outputs.page_url }}
-        run: |
-          for i in $(seq 1 12); do
-            curl -sSf "$SMOKE_TEST_URL" -o /dev/null && exit 0
-            sleep 5
-          done
-          echo "site did not become reachable in time" >&2
-          exit 1
+      # Cloudflare fronts stuartnelson.xyz with its own cache TTL, so a
+      # freshly pushed build may not be visible immediately; this only
+      # affects how soon the smoke test sees it, not the deploy itself.
+      - run: sleep 20
       - run: node scripts/smoke-test.mjs
         env:
-          SMOKE_TEST_URL: ${{ needs.deploy.outputs.page_url }}
+          SMOKE_TEST_URL: https://stuartnelson.xyz/utxo-trace/
