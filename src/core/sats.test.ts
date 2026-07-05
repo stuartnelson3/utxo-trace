@@ -10,16 +10,25 @@ describe('parseBtcToSats', () => {
     ['0.30000000', 30_000_000],
     ['20999999.99999999', 2_099_999_999_999_999],
     ['-0.5', -50_000_000],
+    // Real Kraken ledger exports zero-pad every amount to 10 decimal
+    // places regardless of actual precision — these are exact at 8
+    // decimals, not genuine sub-satoshi values, and must be accepted.
+    ['0.0094092700', 940_927],
+    ['-0.0003500000', -35_000],
+    ['0.2233404600', 22_334_046],
+    // Some real Kraken rows carry genuine precision past 8 decimals (their
+    // internal trade-fill accounting, not on-chain data) — round to the
+    // nearest satoshi rather than rejecting.
+    ['0.0054436263', 544_363], // 63 at the 9th/10th place rounds the 8th up
+    ['0.123456789', 12_345_679], // 9 rounds the 8th digit up: ...678 -> ...679
+    ['0.0000000019', 0], // rounds down to zero — sub-satoshi dust
   ])('parses %s -> %i sats', (input, expected) => {
     expect(parseBtcToSats(input)).toBe(expected);
   });
 
-  it.each([['1e-8'], ['1,5'], [''], ['0.123456789'], ['abc'], ['0.-5'], ['1.2.3']])(
-    'rejects %s',
-    (input) => {
-      expect(() => parseBtcToSats(input)).toThrow(ParseError);
-    }
-  );
+  it.each([['1e-8'], ['1,5'], [''], ['abc'], ['0.-5'], ['1.2.3']])('rejects %s', (input) => {
+    expect(() => parseBtcToSats(input)).toThrow(ParseError);
+  });
 
   it('round-trips arbitrary integer sats through toFixed(8) formatting', () => {
     fc.assert(

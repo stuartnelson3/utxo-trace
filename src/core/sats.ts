@@ -20,11 +20,22 @@ export function parseBtcToSats(s: string): number {
     throw new ParseError(`not a valid decimal BTC amount: ${JSON.stringify(s)}`, s);
   }
   const [, negSign, intPart, fracPart = ''] = match;
-  if (fracPart.length > 8) {
-    throw new ParseError(`more than 8 decimal places: ${JSON.stringify(s)}`, s);
+  // Round to the nearest satoshi rather than rejecting excess decimal
+  // digits: real exchange ledgers legitimately carry more precision than a
+  // satoshi actually has (Kraken's ledger does this for trade fills, which
+  // settle against its internal balance accounting before ever touching
+  // the chain — e.g. "0.0054436263" is a real row, not garbage padding).
+  // A difference of a fraction of a sat has no material effect on cost
+  // basis, so rounding is the correct, robust behavior here, not rejection.
+  let magnitude: bigint;
+  if (fracPart.length <= 8) {
+    const fracPadded = fracPart.padEnd(8, '0');
+    magnitude = BigInt(intPart) * 10n ** 8n + BigInt(fracPadded || '0');
+  } else {
+    const kept = fracPart.slice(0, 8);
+    const roundUp = fracPart[8] >= '5';
+    magnitude = BigInt(intPart) * 10n ** 8n + BigInt(kept) + (roundUp ? 1n : 0n);
   }
-  const fracPadded = fracPart.padEnd(8, '0');
-  const magnitude = BigInt(intPart) * 10n ** 8n + BigInt(fracPadded || '0');
   const signed = negSign ? -magnitude : magnitude;
   if (signed > BigInt(Number.MAX_SAFE_INTEGER) || signed < -BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new ParseError(`amount exceeds the safe integer range: ${JSON.stringify(s)}`, s);
