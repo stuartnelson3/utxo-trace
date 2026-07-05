@@ -1,0 +1,29 @@
+{
+  "txid": "d41f5de48325e79070ccd3a23005f7a3b405f3ce1faa4df09f6d71770497e9d5",
+  "version": 2,
+  "locktime": 0,
+  "size": 191,
+  "weight": 560,
+  "sigops": 1,
+  "fee": 6668,
+  "vin": [
+    {
+      "txid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "vout": 0,
+      "is_coinbase": false,
+      "sequence": 4294967295
+    }
+  ],
+  "vout": [
+    {
+      "scriptpubkey": "0014def",
+      "scriptpubkey_address": "bc1qexampleaddress1111111111111111111111",
+      "value": 143332
+    }
+  ],
+  "status": {
+    "confirmed": true,
+    "block_height": 800000,
+    "block_time": 1690168629
+  }
+}

@@ -10,6 +10,7 @@ import LotTable from './LotTable';
 import Legend from './Legend';
 import { METHODOLOGY } from '../core/methodology';
 import pkg from '../../package.json';
+import type { PriceDivergence } from '../api';
 
 interface Props {
   rootNode: UTXONode;
@@ -17,6 +18,8 @@ interface Props {
   leaves: ScaledLeaf[];
   excludedLeaves: ScaledLeaf[];
   expandedIds: Set<string>;
+  priceDivergences: PriceDivergence[];
+  crossCheckStats: { total: number; verified: number };
 }
 
 const Row: React.FC<{ label: string; value: React.ReactNode; muted?: boolean }> = ({
@@ -33,7 +36,18 @@ const Row: React.FC<{ label: string; value: React.ReactNode; muted?: boolean }> 
 );
 
 const BasisReport = forwardRef<HTMLDivElement, Props>(
-  ({ rootNode, totalBasis, leaves, excludedLeaves, expandedIds }, ref) => {
+  (
+    {
+      rootNode,
+      totalBasis,
+      leaves,
+      excludedLeaves,
+      expandedIds,
+      priceDivergences,
+      crossCheckStats,
+    },
+    ref
+  ) => {
     if (!rootNode) return null;
 
     const {
@@ -378,6 +392,32 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           </div>
         )}
 
+        {/* Price source divergences */}
+        {priceDivergences.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div
+              style={{
+                fontWeight: 'bold',
+                borderBottom: '1px solid #000',
+                marginBottom: 8,
+                paddingBottom: 4,
+              }}
+            >
+              price source divergences
+            </div>
+            {priceDivergences.map((d, i) => (
+              <div
+                key={i}
+                style={{ borderBottom: '1px solid #ddd', padding: '6px 0', fontSize: 11 }}
+              >
+                {d.day}: mempool.space ${d.primaryUsd.toFixed(2)} vs. kraken $
+                {d.crossCheckUsd.toFixed(2)} — {(d.divergence * 100).toFixed(2)}% divergence
+                (mempool.space value used)
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Lineage path */}
         <div style={{ marginBottom: 20 }}>
           <div
@@ -436,6 +476,12 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
             <div>
               <strong>fx:</strong> {METHODOLOGY.fx.source}; {METHODOLOGY.fx.rule}.
             </div>
+            {crossCheckStats.total > 0 && (
+              <div>
+                <strong>cross-check:</strong> {crossCheckStats.verified} of {crossCheckStats.total}{' '}
+                estimated prices cross-verified against Kraken OHLC within 2%.
+              </div>
+            )}
             <div>
               <strong>attribution:</strong> {METHODOLOGY.attribution.rule},{' '}
               {METHODOLOGY.attribution.scope}.

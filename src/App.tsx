@@ -3,8 +3,22 @@ import { useReactToPrint } from 'react-to-print';
 import UTXONode from './components/UTXONode';
 import BasisReport from './components/BasisReport';
 import Legend from './components/Legend';
+import DataSourcesPanel from './components/DataSourcesPanel';
 import { UTXONode as UTXONodeType } from './core/types';
-import { fetchNodeData, fetchChildNodes, fetchRawBtcUsd, fetchUsdToEurRate, queue } from './api';
+import {
+  fetchTx,
+  fetchNodeData,
+  fetchChildNodes,
+  fetchRawBtcUsd,
+  fetchUsdToEurRate,
+  queue,
+  setCustomEsploraSource,
+  setPriceCrossCheck,
+  resetCrossCheckStats,
+  getCrossCheckStats,
+  priceDivergences,
+} from './api';
+import { probeEsploraEndpoint } from './providers/customEsplora';
 import {
   collectLeaves,
   collectExcluded,
@@ -50,6 +64,12 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [queueStats, setQueueStats] = useState({ active: 0, pending: 0 });
   const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>(APP_CONFIG.CURRENCY);
+
+  // Data source settings — component state only, no hidden persistence.
+  const [showDataSources, setShowDataSources] = useState(false);
+  const [txSourceMode, setTxSourceMode] = useState<'mempool' | 'custom'>('mempool');
+  const [customEsploraUrl, setCustomEsploraUrl] = useState('');
+  const [priceCrossCheckEnabled, setPriceCrossCheckEnabled] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
   const pendingAutoExpand = useRef<string[]>([]);
   const csvFileRef = useRef<HTMLInputElement>(null);
@@ -106,6 +126,28 @@ const App: React.FC = () => {
   // Progress UX for deep expansions: subscribe to the shared fetch queue.
   useEffect(() => queue.onChange(setQueueStats), []);
 
+  const handleSelectMempool = () => {
+    setTxSourceMode('mempool');
+    setCustomEsploraSource(null);
+  };
+
+  // Probes with a known-good genesis-era txid before accepting the custom
+  // endpoint, per the settings UI spec — never switch on an unreachable URL.
+  const handleProbeAndSelectCustom = async (baseUrl: string): Promise<boolean> => {
+    const ok = await probeEsploraEndpoint(baseUrl);
+    if (ok) {
+      setTxSourceMode('custom');
+      setCustomEsploraUrl(baseUrl);
+      setCustomEsploraSource(baseUrl);
+    }
+    return ok;
+  };
+
+  const handleTogglePriceCrossCheck = (enabled: boolean) => {
+    setPriceCrossCheckEnabled(enabled);
+    setPriceCrossCheck(enabled);
+  };
+
   const handleInitialFetch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchTxid) return;
@@ -113,8 +155,7 @@ const App: React.FC = () => {
     setExpandedIds(new Set());
     setSelectedVout(null);
     try {
-      const res = await fetch(`https://mempool.space/api/tx/${searchTxid}`);
-      const txData = await res.json();
+      const txData = await fetchTx(searchTxid);
       setPendingOutputs(txData.vout);
     } catch {
       alert('Transaction not found. Check the TXID and try again.');
@@ -129,6 +170,7 @@ const App: React.FC = () => {
     setDisposalDate('');
     setDisposalPriceStr('');
     setLoading(true);
+    resetCrossCheckStats(); // divergences/stats are per-report
     try {
       const data = await fetchNodeData(searchTxid, voutIndex);
       setRootNode(data);
@@ -567,8 +609,32 @@ const App: React.FC = () => {
                 </button>
               ))}
             </div>
+
+            <button
+              onClick={() => setShowDataSources(!showDataSources)}
+              style={{
+                font: '14px/1.7 monospace',
+                border: '1px solid var(--border)',
+                padding: '0 8px',
+                cursor: 'pointer',
+                background: 'var(--bg)',
+                color: 'var(--fg)',
+              }}
+            >
+              [data sources]
+            </button>
           </div>
         </div>
+        {showDataSources && (
+          <DataSourcesPanel
+            txSourceMode={txSourceMode}
+            customEsploraUrl={customEsploraUrl}
+            priceCrossCheck={priceCrossCheckEnabled}
+            onSelectMempool={handleSelectMempool}
+            onProbeAndSelectCustom={handleProbeAndSelectCustom}
+            onTogglePriceCrossCheck={handleTogglePriceCrossCheck}
+          />
+        )}
         <hr
           style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '8px 0 12px' }}
         />
@@ -822,6 +888,8 @@ const App: React.FC = () => {
               leaves={leavesWithAttribution}
               excludedLeaves={excludedLeaves}
               expandedIds={expandedIds}
+              priceDivergences={priceDivergences}
+              crossCheckStats={getCrossCheckStats()}
             />
           </TraceContext.Provider>
         )}
