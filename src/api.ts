@@ -23,12 +23,24 @@ const krakenPriceSource = new KrakenOhlcPriceSource(queue);
 let activeTxSource: TxSource = mempoolTxSource;
 let crossCheckEnabled = false;
 
+interface PriceCacheEntry {
+  source: string;
+  day: string;
+  usd: number;
+}
+interface FxCacheEntry {
+  day: string;
+  usdToEur: number;
+}
+
 // Keyed by (sourceLabel, ...) so switching sources can never serve stale
-// cross-source data. Exported readonly-ish for task 7's session bundle to
-// serialize; App.tsx doesn't mutate these directly.
+// cross-source data. The value shape (not just a bare number) means the
+// evidence bundle (task 7) can serialize these directly, without having to
+// split a composite string key back apart — which would be ambiguous for a
+// custom source label like "custom:http://host:1234/api".
 export const txCache = new Map<string, EsploraTx>(); // `${sourceLabel}:${txid}`
-export const priceCache = new Map<string, number>(); // `${sourceLabel}:${day}`
-export const fxCache = new Map<string, number>(); // day (single source: ECB)
+export const priceCache = new Map<string, PriceCacheEntry>(); // `${sourceLabel}:${day}`
+export const fxCache = new Map<string, FxCacheEntry>(); // day (single source: ECB)
 
 export interface PriceDivergence {
   day: string;
@@ -61,6 +73,29 @@ export function setPriceCrossCheck(enabled: boolean): void {
   crossCheckEnabled = enabled;
 }
 
+// --- Evidence bundle (task 7) support: export/import the raw cache maps ---
+
+export function exportCaches() {
+  return {
+    txCache: Object.fromEntries(txCache),
+    priceCache: [...priceCache.values()],
+    fxCache: [...fxCache.values()],
+  };
+}
+
+export function importCaches(data: {
+  txCache: Record<string, EsploraTx>;
+  priceCache: PriceCacheEntry[];
+  fxCache: FxCacheEntry[];
+}): void {
+  txCache.clear();
+  priceCache.clear();
+  fxCache.clear();
+  for (const [key, tx] of Object.entries(data.txCache)) txCache.set(key, tx);
+  for (const entry of data.priceCache) priceCache.set(`${entry.source}:${entry.day}`, entry);
+  for (const entry of data.fxCache) fxCache.set(entry.day, entry);
+}
+
 export async function fetchTx(txid: string): Promise<EsploraTx> {
   const key = `${activeTxSource.label}:${txid}`;
   const cached = txCache.get(key);
@@ -76,8 +111,9 @@ async function crossCheckAgainstKraken(
   primaryUsd: number
 ): Promise<void> {
   const krakenKey = `${krakenPriceSource.label}:${day}`;
-  let krakenUsd = priceCache.get(krakenKey);
-  if (krakenUsd === undefined) {
+  let entry = priceCache.get(krakenKey);
+  if (entry === undefined) {
+    let krakenUsd: number;
     try {
       krakenUsd = await krakenPriceSource.getDailyUsd(snappedTs);
     } catch {
@@ -89,12 +125,13 @@ async function crossCheckAgainstKraken(
       // at all, not a divergence.
       return;
     }
-    priceCache.set(krakenKey, krakenUsd);
+    entry = { source: krakenPriceSource.label, day, usd: krakenUsd };
+    priceCache.set(krakenKey, entry);
   }
   crossCheckStats.total++;
-  const divergence = relativeDivergence(primaryUsd, krakenUsd);
-  if (isDivergent(primaryUsd, krakenUsd)) {
-    priceDivergences.push({ day, primaryUsd, crossCheckUsd: krakenUsd, divergence });
+  const divergence = relativeDivergence(primaryUsd, entry.usd);
+  if (isDivergent(primaryUsd, entry.usd)) {
+    priceDivergences.push({ day, primaryUsd, crossCheckUsd: entry.usd, divergence });
   } else {
     crossCheckStats.verified++;
   }
@@ -103,23 +140,24 @@ async function crossCheckAgainstKraken(
 export async function fetchRawBtcUsd(ts: number): Promise<number> {
   const day = toDayKey(prevDailySnapshot(ts));
   const key = `${mempoolPriceSource.label}:${day}`;
-  let usd = priceCache.get(key);
-  if (usd === undefined) {
-    usd = await mempoolPriceSource.getDailyUsd(ts);
-    priceCache.set(key, usd);
+  let entry = priceCache.get(key);
+  if (entry === undefined) {
+    const usd = await mempoolPriceSource.getDailyUsd(ts);
+    entry = { source: mempoolPriceSource.label, day, usd };
+    priceCache.set(key, entry);
   }
 
-  if (crossCheckEnabled && usd > 0) {
-    await crossCheckAgainstKraken(day, prevDailySnapshot(ts), usd);
+  if (crossCheckEnabled && entry.usd > 0) {
+    await crossCheckAgainstKraken(day, prevDailySnapshot(ts), entry.usd);
   }
 
-  return usd;
+  return entry.usd;
 }
 
 export async function fetchUsdToEurRate(ts: number): Promise<number> {
   const day = toDayKey(ts);
   const cached = fxCache.get(day);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return cached.usdToEur;
 
   async function fetchJson(url: string, notFoundMessage: string): Promise<any> {
     const res = await fetch(url);
@@ -141,7 +179,7 @@ export async function fetchUsdToEurRate(ts: number): Promise<number> {
   );
   const rate = data.rates?.EUR;
   if (rate == null) throw new Error('EUR rate missing from response');
-  fxCache.set(day, rate);
+  fxCache.set(day, { day, usdToEur: rate });
   return rate;
 }
 

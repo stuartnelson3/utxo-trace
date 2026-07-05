@@ -9,7 +9,6 @@ import { swanToLotRows } from '../core/swan';
 import LotTable from './LotTable';
 import Legend from './Legend';
 import { METHODOLOGY } from '../core/methodology';
-import pkg from '../../package.json';
 import type { PriceDivergence } from '../api';
 
 interface Props {
@@ -20,6 +19,7 @@ interface Props {
   expandedIds: Set<string>;
   priceDivergences: PriceDivergence[];
   crossCheckStats: { total: number; verified: number };
+  bundleHash: string | null;
 }
 
 const Row: React.FC<{ label: string; value: React.ReactNode; muted?: boolean }> = ({
@@ -45,6 +45,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
       expandedIds,
       priceDivergences,
       crossCheckStats,
+      bundleHash,
     },
     ref
   ) => {
@@ -516,8 +517,8 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
               </tbody>
             </table>
             <div style={{ marginTop: 8, color: '#999' }}>
-              methodology v{METHODOLOGY.version} · app v{pkg.version} · commit dev · generated{' '}
-              {new Date().toISOString()}
+              methodology v{METHODOLOGY.version} · app v{__APP_VERSION__} · commit {__COMMIT__} ·
+              generated {new Date().toISOString()}
               {disposalDate && (
                 <>
                   {' '}
@@ -533,6 +534,14 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
         <div style={{ marginBottom: 12 }}>
           <Legend dark={false} />
         </div>
+
+        {/* Evidence bundle */}
+        {bundleHash && (
+          <div style={{ fontSize: 10, color: '#999', marginBottom: 12 }}>
+            evidence bundle sha256 {bundleHash} · app {__APP_VERSION__} · commit {__COMMIT__} ·
+            methodology v{METHODOLOGY.version}
+          </div>
+        )}
 
         {/* Footer */}
         <div

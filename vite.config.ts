@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import pkg from './package.json';
 
 // Self-hosters who want a remote (non-localhost) custom Esplora endpoint set
 // VITE_EXTRA_CONNECT_SRC (e.g. "https://esplora.example.com") to extend the
@@ -19,5 +20,11 @@ export default defineConfig(({ command }) => ({
   server: {
     port: 5173,
     strictPort: true,
+  },
+  // CI (deploy.yml) sets VITE_COMMIT_SHA to the release's git sha;
+  // falls back to "dev" for local builds until then.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __COMMIT__: JSON.stringify(process.env.VITE_COMMIT_SHA ?? 'dev'),
   },
 }));

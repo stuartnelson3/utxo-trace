@@ -17,8 +17,11 @@ import {
   resetCrossCheckStats,
   getCrossCheckStats,
   priceDivergences,
+  exportCaches,
+  importCaches,
 } from './api';
 import { probeEsploraEndpoint } from './providers/customEsplora';
+import { EvidenceBundle, hashBundle, migrate } from './core/bundle';
 import {
   collectLeaves,
   collectExcluded,
@@ -40,6 +43,7 @@ import {
   fillMissingPrices,
   KrakenWithdrawalAttribution,
   LedgerEntry,
+  TradeEntry,
 } from './core/kraken';
 import {
   detectSwanCsvType,
@@ -49,6 +53,7 @@ import {
   buildSwanAttributions,
   SwanWithdrawalAttribution,
   SwanLot,
+  SwanWithdrawal,
 } from './core/swan';
 
 const App: React.FC = () => {
@@ -72,12 +77,26 @@ const App: React.FC = () => {
   const [priceCrossCheckEnabled, setPriceCrossCheckEnabled] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
   const pendingAutoExpand = useRef<string[]>([]);
+  // True while replaying expandedIds from a URL/bundle restore — expands
+  // during replay shouldn't clear the "offline replay" banner, only
+  // genuinely new user-initiated expansion should.
+  const isAutoExpandingRef = useRef(false);
   const csvFileRef = useRef<HTMLInputElement>(null);
+  const sessionFileRef = useRef<HTMLInputElement>(null);
   const disposalPriceRef = useRef<HTMLInputElement>(null);
+
+  // Evidence bundle (task 7)
+  const [bundleHash, setBundleHash] = useState<string | null>(null);
+  // Set on import, cleared as soon as the user expands beyond cached data
+  // (which triggers live fetches and changes the hash on next export).
+  const [offlineReplayHash, setOfflineReplayHash] = useState<string | null>(null);
 
   // Kraken state — explicit user matching (candidates can be ambiguous, so
   // the user always confirms; matches are persisted by refid, not amount).
   const [krakenLedger, setKrakenLedger] = useState<LedgerEntry[]>([]);
+  // Kept for the evidence bundle (task 7) — previously discarded after
+  // buildAttributions, but re-deriving attributions on import needs it.
+  const [krakenTrades, setKrakenTrades] = useState<Map<string, TradeEntry>>(new Map());
   const [krakenAttributions, setKrakenAttributions] = useState<Map<
     string,
     KrakenWithdrawalAttribution
@@ -108,6 +127,9 @@ const App: React.FC = () => {
     SwanWithdrawalAttribution
   > | null>(null);
   const [swanWarnings, setSwanWarnings] = useState<string[]>([]);
+  // Kept for the evidence bundle — same reasoning as krakenTrades above.
+  const [swanLotsState, setSwanLotsState] = useState<SwanLot[]>([]);
+  const [swanWithdrawalsState, setSwanWithdrawalsState] = useState<SwanWithdrawal[]>([]);
 
   const [csvLoading, setCsvLoading] = useState(false);
   // What was detected per exchange — shown as compact type summaries, not filenames.
@@ -190,6 +212,11 @@ const App: React.FC = () => {
       return;
     }
     setLoading(true);
+    // Expanding beyond what the imported bundle already covers may trigger
+    // live fetches, which would change the hash on next export — the
+    // "offline replay" banner no longer accurately describes the session.
+    // Auto-expand replaying the bundle's own expandedIds doesn't count.
+    if (!isAutoExpandingRef.current) setOfflineReplayHash(null);
     try {
       const children = await fetchChildNodes(node.txid);
       setRootNode((prev) => (prev ? updateNode(prev, nodeId, (n) => ({ ...n, children })) : null));
@@ -359,6 +386,7 @@ const App: React.FC = () => {
         const raw = buildAttributions(ledger, trades);
         const filled = await fillMissingPrices(raw, fetchRawBtcUsd, fetchUsdToEurRate);
         setKrakenLedger(ledger);
+        setKrakenTrades(trades);
         setKrakenAttributions(filled);
         setKrakenMatches(new Map()); // clear stale matches when CSV reloaded
         setKrakenSummary(krakenTradesText ? 'ledger + trades' : 'ledger');
@@ -398,6 +426,8 @@ const App: React.FC = () => {
     if (hasSwanLots && hasSwanWithdrawals) {
       try {
         const withdrawals = parseSwanWithdrawals(swanWithdrawalsText);
+        setSwanLotsState(swanLots);
+        setSwanWithdrawalsState(withdrawals);
         setSwanAttributions(buildSwanAttributions(swanLots, withdrawals));
         setSwanSummary(`${swanLotSource} + withdrawals`);
       } catch (err) {
@@ -439,15 +469,24 @@ const App: React.FC = () => {
     history.replaceState(null, '', `?${parts.join('&')}`);
   }, [rootNode, searchTxid, selectedVout, expandedIds]);
 
-  // Auto-expand nodes restored from URL, one at a time top-down
+  // Auto-expand nodes restored from URL or an imported bundle, one at a
+  // time top-down. isAutoExpandingRef distinguishes this replay from
+  // genuinely new user-initiated expansion (see handleExpand).
   useEffect(() => {
-    if (!rootNode || pendingAutoExpand.current.length === 0) return;
+    if (!rootNode || pendingAutoExpand.current.length === 0) {
+      isAutoExpandingRef.current = false;
+      return;
+    }
+    isAutoExpandingRef.current = true;
     pendingAutoExpand.current = pendingAutoExpand.current.filter((id) => {
       const n = findNode(rootNode, id);
       return n === null || n.children.length === 0;
     });
     const nextId = pendingAutoExpand.current.find((id) => findNode(rootNode, id) !== null);
-    if (!nextId) return;
+    if (!nextId) {
+      isAutoExpandingRef.current = false;
+      return;
+    }
     pendingAutoExpand.current = pendingAutoExpand.current.filter((id) => id !== nextId);
     handleExpand(nextId);
   }, [rootNode]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -539,6 +578,184 @@ const App: React.FC = () => {
     ]
   );
 
+  // --- Evidence bundle: export/import (task 7) ---
+
+  const buildBundle = (): EvidenceBundle | null => {
+    if (!rootNode || selectedVout === null) return null;
+    const caches = exportCaches();
+    return {
+      schemaVersion: 1,
+      app: { version: __APP_VERSION__, commit: __COMMIT__ },
+      createdAt: new Date().toISOString(),
+      inputs: {
+        rootTxid: searchTxid,
+        selectedVout,
+        disposal: disposalDate
+          ? {
+              timestamp: disposalTimestamp,
+              priceDisplay: disposalPriceNum,
+              currency: displayCurrency,
+            }
+          : null,
+      },
+      krakenLedger: krakenLedger.map((e) => ({ ...e, time: e.time.toISOString() })),
+      krakenTrades: [...krakenTrades.values()],
+      swanLots: swanLotsState.map((l) => ({ ...l, date: l.date.toISOString() })),
+      swanWithdrawals: swanWithdrawalsState.map((w) => ({ ...w, date: w.date.toISOString() })),
+      txCache: caches.txCache,
+      priceCache: caches.priceCache,
+      fxCache: caches.fxCache,
+      tree: { expandedIds: [...expandedIds] },
+      matches: [...krakenMatches.entries()].map(([nodeId, m]) => ({
+        nodeId,
+        refid: m.refid,
+        amountBasis: m.amountBasis,
+      })),
+      overrides: [...overrideRecords.values()],
+      prunedBranches: [...pruneRecords.values()],
+      settings: {
+        txSourceMode,
+        customEsploraUrl,
+        priceCrossCheck: priceCrossCheckEnabled,
+      },
+    };
+  };
+
+  // Recompute the footer hash whenever the report's inputs change (the hash
+  // itself excludes createdAt, so this doesn't churn on re-render alone).
+  useEffect(() => {
+    const bundle = buildBundle();
+    if (!bundle) {
+      setBundleHash(null);
+      return;
+    }
+    let cancelled = false;
+    hashBundle(bundle).then((h) => {
+      if (!cancelled) setBundleHash(h);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    rootNode,
+    selectedVout,
+    disposalDate,
+    disposalPriceNum,
+    krakenLedger,
+    krakenTrades,
+    swanLotsState,
+    swanWithdrawalsState,
+    expandedIds,
+    krakenMatches,
+    overrideRecords,
+    pruneRecords,
+  ]);
+
+  const handleExportSession = async () => {
+    const bundle = buildBundle();
+    if (!bundle) return;
+    const hash = await hashBundle(bundle);
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `utxo-trace-session-${hash.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportSession = async (file: File) => {
+    const text = await file.text();
+    let bundle: EvidenceBundle;
+    try {
+      bundle = migrate(JSON.parse(text));
+    } catch (err) {
+      const message =
+        err && typeof err === 'object' && 'issues' in err
+          ? (err as { issues: Array<{ path: (string | number)[]; message: string }> }).issues
+              .map((i) => `${i.path.join('.')}: ${i.message}`)
+              .join('; ')
+          : (err as Error).message;
+      alert(`Failed to import session — invalid bundle:\n${message}`);
+      return;
+    }
+
+    // Restore settings first so the active tx source matches whatever the
+    // cache was built against.
+    if (bundle.settings) {
+      setTxSourceMode(bundle.settings.txSourceMode);
+      setCustomEsploraUrl(bundle.settings.customEsploraUrl);
+      setPriceCrossCheckEnabled(bundle.settings.priceCrossCheck);
+      setPriceCrossCheck(bundle.settings.priceCrossCheck);
+      setCustomEsploraSource(
+        bundle.settings.txSourceMode === 'custom' ? bundle.settings.customEsploraUrl : null
+      );
+    } else {
+      setCustomEsploraSource(null);
+    }
+
+    importCaches({
+      txCache: bundle.txCache,
+      priceCache: bundle.priceCache,
+      fxCache: bundle.fxCache,
+    });
+
+    setKrakenLedger(bundle.krakenLedger.map((e) => ({ ...e, time: new Date(e.time) })));
+    setKrakenTrades(new Map(bundle.krakenTrades.map((t) => [t.txid, t])));
+    setSwanLotsState(bundle.swanLots.map((l) => ({ ...l, date: new Date(l.date) })));
+    setSwanWithdrawalsState(bundle.swanWithdrawals.map((w) => ({ ...w, date: new Date(w.date) })));
+
+    if (bundle.krakenLedger.length > 0) {
+      const ledger = bundle.krakenLedger.map((e) => ({ ...e, time: new Date(e.time) }));
+      const trades = new Map(bundle.krakenTrades.map((t) => [t.txid, t]));
+      const raw = buildAttributions(ledger, trades);
+      // Prices are already resolved in the ledger/trades data (or served
+      // from the imported price/fx caches below) — no network needed.
+      const filled = await fillMissingPrices(raw, fetchRawBtcUsd, fetchUsdToEurRate);
+      setKrakenAttributions(filled);
+      setKrakenSummary(bundle.krakenTrades.length > 0 ? 'ledger + trades' : 'ledger');
+    }
+    if (bundle.swanLots.length > 0 && bundle.swanWithdrawals.length > 0) {
+      const lots = bundle.swanLots.map((l) => ({ ...l, date: new Date(l.date) }));
+      const withdrawals = bundle.swanWithdrawals.map((w) => ({ ...w, date: new Date(w.date) }));
+      setSwanAttributions(buildSwanAttributions(lots, withdrawals));
+      setSwanSummary('imported');
+    }
+
+    setKrakenMatches(
+      new Map(bundle.matches.map((m) => [m.nodeId, { refid: m.refid, amountBasis: m.amountBasis }]))
+    );
+    setOverrideRecords(new Map(bundle.overrides.map((o) => [o.nodeId, o])));
+    setPruneRecords(new Map(bundle.prunedBranches.map((p) => [p.nodeId, p])));
+
+    setSearchTxid(bundle.inputs.rootTxid);
+    setSelectedVout(bundle.inputs.selectedVout);
+    if (bundle.inputs.disposal) {
+      setDisposalDate(new Date(bundle.inputs.disposal.timestamp * 1000).toISOString().slice(0, 10));
+      setDisposalPriceStr(bundle.inputs.disposal.priceDisplay?.toString() ?? '');
+    } else {
+      setDisposalDate('');
+      setDisposalPriceStr('');
+    }
+    setDisplayCurrency(bundle.inputs.disposal?.currency ?? APP_CONFIG.CURRENCY);
+    setExpandedIds(new Set());
+    pendingAutoExpand.current = bundle.tree.expandedIds;
+
+    const hash = await hashBundle(bundle);
+    setOfflineReplayHash(hash);
+    setLoading(true);
+    try {
+      const data = await fetchNodeData(bundle.inputs.rootTxid, bundle.inputs.selectedVout);
+      setRootNode(data);
+    } catch (err) {
+      console.error('Session import: root node fetch failed:', err);
+      alert('Import failed: could not reconstruct the trace root from the bundle.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div style={{ maxWidth: 960, margin: '40px auto', padding: '0 20px' }}>
       {/* Header */}
@@ -623,8 +840,62 @@ const App: React.FC = () => {
             >
               [data sources]
             </button>
+
+            {rootNode && (
+              <button
+                onClick={handleExportSession}
+                title="the exported file contains your transaction graph and parsed exchange history — treat it like a bank statement"
+                style={{
+                  font: '14px/1.7 monospace',
+                  border: '1px solid var(--border)',
+                  padding: '0 8px',
+                  cursor: 'pointer',
+                  background: 'var(--bg)',
+                  color: 'var(--fg)',
+                }}
+              >
+                [export session]
+              </button>
+            )}
+            <input
+              ref={sessionFileRef}
+              type="file"
+              accept=".json"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleImportSession(file);
+                e.target.value = '';
+              }}
+            />
+            <button
+              onClick={() => sessionFileRef.current?.click()}
+              style={{
+                font: '14px/1.7 monospace',
+                border: '1px solid var(--border)',
+                padding: '0 8px',
+                cursor: 'pointer',
+                background: 'var(--bg)',
+                color: 'var(--fg)',
+              }}
+            >
+              [import session]
+            </button>
           </div>
         </div>
+        {offlineReplayHash && (
+          <div
+            style={{
+              marginTop: 8,
+              padding: '4px 8px',
+              border: '1px solid var(--exempt)',
+              color: 'var(--exempt)',
+              fontSize: 12,
+            }}
+          >
+            offline replay — data from bundle {offlineReplayHash.slice(0, 8)}
+          </div>
+        )}
         {showDataSources && (
           <DataSourcesPanel
             txSourceMode={txSourceMode}
@@ -875,6 +1146,10 @@ const App: React.FC = () => {
         . exchange cost basis from kraken (ledger + trades csvs) or swan bitcoin (transfers or
         trades + withdrawals csvs; transfers preferred when both are loaded). verify with a tax
         professional before filing.
+        <div style={{ marginTop: 8, fontSize: 10 }}>
+          app v{__APP_VERSION__} · commit {__COMMIT__}
+          {bundleHash && ` · evidence bundle ${bundleHash.slice(0, 8)}`}
+        </div>
       </footer>
 
       {/* Hidden print target */}
@@ -890,6 +1165,7 @@ const App: React.FC = () => {
               expandedIds={expandedIds}
               priceDivergences={priceDivergences}
               crossCheckStats={getCrossCheckStats()}
+              bundleHash={bundleHash}
             />
           </TraceContext.Provider>
         )}
