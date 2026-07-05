@@ -52,4 +52,24 @@ export const METHODOLOGY = {
     mixed: 'aggregate of both tiers',
     override: 'price manually asserted by the user (see Manual price assertions table)',
   },
+  // What this report actually is: FIFO on the exchange side (the exchange
+  // ledger doesn't preserve which specific coin funded which withdrawal),
+  // specific-evidence attribution on the chain side (the user proves which
+  // UTXO descends from which withdrawal by tracing the transaction graph).
+  // Neither "all FIFO" nor "all specific identification" is honest; these
+  // labels say exactly what's true, per display currency.
+  labels: {
+    en_usd:
+      'FIFO lot attribution — the IRS default basis method (Treas. Reg. ' +
+      '§1.1012-1) absent a contemporaneous specific-identification election; ' +
+      'on-chain attribution by specific evidence. Note: this report documents ' +
+      'FIFO results; it is not itself a specific-ID election, which must be ' +
+      'made at or before the time of sale.',
+    en_eur:
+      'FIFO consumption per exchange account (German BMF guidance); ' +
+      'on-chain attribution by specific evidence',
+    de:
+      'FIFO-Verbrauchsfolge je Börsenkonto (BMF-Schreiben v. 10.05.2022, ' +
+      'Rz. 61); Zuordnung on-chain per Einzelnachweis',
+  },
 } as const;

@@ -98,7 +98,9 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           <div style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 4 }}>
             proportional basis audit
           </div>
-          <div style={{ color: '#555', fontSize: 11 }}>specific identification ledger</div>
+          <div style={{ color: '#555', fontSize: 11 }}>
+            {displayCurrency === 'EUR' ? METHODOLOGY.labels.en_eur : METHODOLOGY.labels.en_usd}
+          </div>
           <code style={{ fontSize: 11, color: '#555', wordBreak: 'break-all' }}>
             {rootNode.txid}
           </code>

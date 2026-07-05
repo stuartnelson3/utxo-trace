@@ -41,3 +41,33 @@ describe('no magic numbers outside methodology.ts', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// Task 8: the report/footer used to call the output a "specific
+// identification ledger" while the exchange-side attribution is FIFO.
+describe('honest labeling', () => {
+  const allSrc = import.meta.glob('../**/*.{ts,tsx}', {
+    eager: true,
+    query: '?raw',
+    import: 'default',
+  }) as Record<string, string>;
+
+  it('"specific identification ledger" appears nowhere in src/', () => {
+    const offenders = Object.entries(allSrc)
+      .filter(([file]) => !file.includes('methodology.ts'))
+      .filter(([, text]) => /specific identification ledger/i.test(text))
+      .map(([file]) => file);
+    expect(offenders).toEqual([]);
+  });
+
+  it('labels encode the FIFO/specific-evidence split honestly, per jurisdiction', () => {
+    // Exchange side is FIFO in both jurisdictions...
+    expect(METHODOLOGY.labels.en_usd).toMatch(/FIFO/);
+    expect(METHODOLOGY.labels.en_eur).toMatch(/FIFO/);
+    expect(METHODOLOGY.labels.de).toMatch(/FIFO/);
+    // ...on-chain side is specific-evidence attribution in both...
+    expect(METHODOLOGY.labels.en_usd).toMatch(/specific evidence/);
+    expect(METHODOLOGY.labels.en_eur).toMatch(/specific evidence/);
+    // ...and the US label explicitly disclaims being a spec-ID election.
+    expect(METHODOLOGY.labels.en_usd).toMatch(/not itself a specific-ID election/);
+  });
+});
