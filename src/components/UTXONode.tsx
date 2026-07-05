@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { UTXONode as UTXONodeType } from '../core/types';
-import { formatCurrency, formatDate } from '../config';
+import { formatCurrency, formatDate, DisplayCurrency } from '../config';
 import { nodePrice } from '../core/tree';
 import { isPara23Exempt } from '../core/holding';
 import { useTraceContext } from '../TraceContext';
 import { krakenToLotRows } from '../core/kraken';
 import { swanToLotRows } from '../core/swan';
 import { MatchCandidate } from '../core/match';
+import { METHODOLOGY } from '../core/methodology';
 import LotTable from './LotTable';
 
 interface FindCandidatesResult {
@@ -33,8 +34,8 @@ interface Props {
   isLastSibling?: boolean;
 }
 
-function describeCandidate(c: MatchCandidate): string {
-  const date = formatDate(c.time);
+function describeCandidate(c: MatchCandidate, currency: DisplayCurrency): string {
+  const date = formatDate(c.time, currency);
   const btc = (c.withdrawalSats / 1e8).toFixed(8);
   const basisNote = c.amountBasis === 'net' ? '' : ` (${c.amountBasis.replace('-', ' ')})`;
   return `${date} ${btc} BTC refid ${c.refid}${basisNote}`;
@@ -224,17 +225,13 @@ const UTXONode: React.FC<Props> = ({
             <code style={{ fontSize: 12 }}>{node.txid.substring(0, 20)}…</code>
             <span style={{ color: 'var(--muted)', fontSize: 12 }}>#{node.vout}</span>
             <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-              {formatDate(new Date(node.timestamp * 1000))}
+              {formatDate(new Date(node.timestamp * 1000), displayCurrency)}
             </span>
             {disposalTimestamp > 0 && (
               <span style={{ color: exempt ? 'var(--exempt)' : 'var(--taxable)', fontSize: 12 }}>
-                {displayCurrency === 'EUR'
-                  ? exempt
-                    ? '[§23 ✓]'
-                    : '[<1yr]'
-                  : exempt
-                    ? '[long-term]'
-                    : '[short-term]'}
+                {exempt
+                  ? METHODOLOGY.holdingPeriodLabels[displayCurrency].badgeExempt
+                  : METHODOLOGY.holdingPeriodLabels[displayCurrency].badgeNotExempt}
               </span>
             )}
             {node.isOverride && (
@@ -372,7 +369,7 @@ const UTXONode: React.FC<Props> = ({
                 >
                   <span>
                     {pendingCandidates!.length === 1 ? 'match: ' : ''}
-                    {describeCandidate(c)}
+                    {describeCandidate(c, displayCurrency)}
                     {!c.timeVerified && (
                       <span style={{ color: 'var(--muted)' }}> (time unverified)</span>
                     )}

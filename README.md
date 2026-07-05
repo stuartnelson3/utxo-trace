@@ -135,8 +135,12 @@ Node version is pinned in `.nvmrc`; the package manager is pinned via the
 
 ## Config
 
-Currency and date locale are set in `src/config.ts`. Default is EUR / de-DE.
-Change `CURRENCY` to `'USD'` to default to USD mode.
+The default display currency is set by `APP_CONFIG.CURRENCY` in
+`src/config.ts` (currently `'EUR'`). Date locale is never set separately —
+it always follows the active currency (EUR → de-DE, USD → en-US), on load
+and when toggled in the header, so a report can't show mismatched
+currency/date formatting. Change `CURRENCY` to `'USD'` to default to USD
+mode instead.
 
 ## Disclaimer
 

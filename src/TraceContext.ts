@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import { DisplayCurrency } from './config';
+import { APP_CONFIG, DisplayCurrency } from './config';
 import { KrakenWithdrawalAttribution } from './core/kraken';
 import { KrakenMatch } from './core/match';
 import { SwanWithdrawalAttribution } from './core/swan';
@@ -21,8 +21,12 @@ interface TraceContextValue {
   excludedSats: number; // total sats moved out by pruning
 }
 
+// This default is only reached if a component reads the context outside
+// <TraceContext.Provider> (App.tsx always wraps rendering with the real
+// value) — but it should still derive from the constant, not duplicate it,
+// so it can't silently fall out of sync if the default currency changes.
 export const TraceContext = createContext<TraceContextValue>({
-  displayCurrency: 'EUR',
+  displayCurrency: APP_CONFIG.CURRENCY,
   disposalTimestamp: 0,
   disposalDate: null,
   disposalPriceDisplay: null,

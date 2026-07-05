@@ -71,7 +71,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
       path.push({
         txid: node.txid,
         amount: node.amountSats / 1e8,
-        date: formatDate(new Date(node.timestamp * 1000)),
+        date: formatDate(new Date(node.timestamp * 1000), displayCurrency),
         price: nodePrice(node, displayCurrency),
       });
       if (expandedIds.has(node.id) && node.children.length > 0) {
@@ -124,7 +124,10 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
         {/* Summary table */}
         <div style={{ marginBottom: 20 }}>
           {disposalDate && (
-            <Row label="date of disposal" value={formatDate(new Date(disposalDate))} />
+            <Row
+              label="date of disposal"
+              value={formatDate(new Date(disposalDate), displayCurrency)}
+            />
           )}
           <Row
             label="disposal proceeds"
@@ -176,17 +179,11 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           {exemptBasis > 0 && (
             <>
               <Row
-                label={
-                  displayCurrency === 'EUR'
-                    ? '§23 EStG exempt basis (>1yr)'
-                    : 'long-term basis (>1yr)'
-                }
+                label={METHODOLOGY.holdingPeriodLabels[displayCurrency].rowExempt}
                 value={<span style={{ color: '#060' }}>{fmt(exemptBasis)}</span>}
               />
               <Row
-                label={
-                  displayCurrency === 'EUR' ? 'taxable basis (≤1yr)' : 'short-term basis (≤1yr)'
-                }
+                label={METHODOLOGY.holdingPeriodLabels[displayCurrency].rowTaxable}
                 value={<span style={{ color: '#b60' }}>{fmt(taxableBasis)}</span>}
               />
             </>
@@ -244,16 +241,14 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
                     <div
                       style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}
                     >
-                      <span>acquired: {formatDate(new Date(node.timestamp * 1000))}</span>
+                      <span>
+                        acquired: {formatDate(new Date(node.timestamp * 1000), displayCurrency)}
+                      </span>
                       {disposalTimestamp > 0 && (
                         <span style={{ color: exempt ? '#060' : '#b60', fontSize: 11 }}>
-                          {displayCurrency === 'EUR'
-                            ? exempt
-                              ? '[§23 ✓]'
-                              : '[<1yr]'
-                            : exempt
-                              ? '[long-term]'
-                              : '[short-term]'}
+                          {exempt
+                            ? METHODOLOGY.holdingPeriodLabels[displayCurrency].badgeExempt
+                            : METHODOLOGY.holdingPeriodLabels[displayCurrency].badgeNotExempt}
                         </span>
                       )}
                       {node.memo && (
@@ -522,7 +517,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
               {disposalDate && (
                 <>
                   {' '}
-                  · disposal {formatDate(new Date(disposalDate))}
+                  · disposal {formatDate(new Date(disposalDate), displayCurrency)}
                   {disposalPriceDisplay != null && ` @ ${fmt(disposalPriceDisplay)}/BTC`}
                 </>
               )}

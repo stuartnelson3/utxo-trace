@@ -1,3 +1,5 @@
+import type { DisplayCurrency } from '../config';
+
 // Single source of truth for every rule that affects a number in the
 // report. This is BOTH configuration (price.ts and match.ts import their
 // numeric constants from here) and documentation (the report renders this
@@ -72,4 +74,21 @@ export const METHODOLOGY = {
       'FIFO-Verbrauchsfolge je Börsenkonto (BMF-Schreiben v. 10.05.2022, ' +
       'Rz. 61); Zuordnung on-chain per Einzelnachweis',
   },
+  // Holding-period vocabulary per display currency — centralized so a
+  // report/badge label can never drift from which jurisdiction's rule
+  // actually produced the exemption (rule_de vs rule_us above).
+  holdingPeriodLabels: {
+    EUR: {
+      rowExempt: '§23 EStG exempt basis (>1yr)',
+      rowTaxable: 'taxable basis (≤1yr)',
+      badgeExempt: '[§23 ✓]',
+      badgeNotExempt: '[<1yr]',
+    },
+    USD: {
+      rowExempt: 'long-term basis (>1yr)',
+      rowTaxable: 'short-term basis (≤1yr)',
+      badgeExempt: '[long-term]',
+      badgeNotExempt: '[short-term]',
+    },
+  } satisfies Record<DisplayCurrency, Record<string, string>>,
 } as const;

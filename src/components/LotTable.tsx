@@ -56,7 +56,7 @@ const LotTable: React.FC<Props> = ({ label, rows, totalDisplay, currency, forceE
         <tbody>
           {visible.map((row, i) => (
             <tr key={i}>
-              <td style={{ paddingRight: 12 }}>{formatDate(row.date)}</td>
+              <td style={{ paddingRight: 12 }}>{formatDate(row.date, currency)}</td>
               <td style={tdR}>{(row.btcSats / 1e8).toFixed(8)}</td>
               <td style={{ ...tdR, color: 'var(--muted)' }}>
                 {formatCurrency(row.priceDisplay, currency)}
