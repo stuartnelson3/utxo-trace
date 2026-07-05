@@ -118,6 +118,31 @@ export function findMatchCandidates(input: FindMatchCandidatesInput): MatchCandi
   });
 }
 
+// Matches are keyed by refid precisely because refid is stable ledger
+// identity — re-uploading a fresh export of the same account (e.g. three
+// new months appended) must not destroy prior confirmations. Reconciles
+// against the newly parsed ledger: a match survives only if its refid still
+// appears as a withdrawal row (a refid that now shows up as a different row
+// type doesn't count as present — the identity has to mean the same thing).
+export function reconcileMatches(
+  existing: Map<string, KrakenMatch>,
+  newLedger: LedgerEntry[]
+): { kept: Map<string, KrakenMatch>; droppedRefids: string[] } {
+  const withdrawalRefids = new Set(
+    newLedger.filter((e) => e.type === 'withdrawal').map((e) => e.refid)
+  );
+  const kept = new Map<string, KrakenMatch>();
+  const droppedRefids: string[] = [];
+  for (const [nodeId, match] of existing) {
+    if (withdrawalRefids.has(match.refid)) {
+      kept.set(nodeId, match);
+    } else {
+      droppedRefids.push(match.refid);
+    }
+  }
+  return { kept, droppedRefids };
+}
+
 // For the zero-candidates UI hint: the closest unmatched withdrawal by
 // amount, ignoring tolerance and the time window entirely, so the user can
 // diagnose a fee-basis or CSV mismatch instead of just seeing "no match".

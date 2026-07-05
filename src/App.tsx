@@ -34,7 +34,13 @@ import {
 } from './core/tree';
 import { formatCurrency, APP_CONFIG, DisplayCurrency } from './config';
 import { TraceContext } from './TraceContext';
-import { findMatchCandidates, findNearestMiss, MatchCandidate, KrakenMatch } from './core/match';
+import {
+  findMatchCandidates,
+  findNearestMiss,
+  reconcileMatches,
+  MatchCandidate,
+  KrakenMatch,
+} from './core/match';
 import {
   detectCsvType,
   parseKrakenLedger,
@@ -396,7 +402,18 @@ const App: React.FC = () => {
         setKrakenLedger(ledger);
         setKrakenTrades(trades);
         setKrakenAttributions(filled);
-        setKrakenMatches(new Map()); // clear stale matches when CSV reloaded
+        // Matches are keyed by refid (stable ledger identity) precisely so a
+        // re-upload of a superset export (e.g. three more months appended)
+        // doesn't destroy prior manual disambiguation work — only refids that
+        // no longer exist as a withdrawal in the new ledger are dropped.
+        const { kept, droppedRefids } = reconcileMatches(krakenMatches, ledger);
+        setKrakenMatches(kept);
+        if (krakenMatches.size > 0) {
+          warnings.push(
+            `kept ${kept.size} confirmed match${kept.size === 1 ? '' : 'es'}; dropped ${droppedRefids.length} no longer in ledger` +
+              (droppedRefids.length > 0 ? ` (${droppedRefids.join(', ')})` : '')
+          );
+        }
         setKrakenSummary(krakenTradesTexts.length > 0 ? 'ledger + trades' : 'ledger');
       } catch (err) {
         console.error('Kraken CSV error:', err);

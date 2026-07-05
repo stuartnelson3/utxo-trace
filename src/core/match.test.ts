@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { findMatchCandidates, findNearestMiss, DEFAULT_TIME_WINDOW, AmountBasis } from './match';
+import {
+  findMatchCandidates,
+  findNearestMiss,
+  reconcileMatches,
+  DEFAULT_TIME_WINDOW,
+  AmountBasis,
+  KrakenMatch,
+} from './match';
 import { LedgerEntry } from './kraken';
 
 function withdrawal(
@@ -176,5 +183,91 @@ describe('findNearestMiss', () => {
 
   it('returns null when there are no unmatched withdrawals', () => {
     expect(findNearestMiss(50_000_000, [], new Set())).toBeNull();
+  });
+});
+
+function trade(refid: string): LedgerEntry {
+  return { txid: `TX-${refid}`, refid, time: BLOCK_TIME, type: 'trade', amountSats: 0, feeSats: 0 };
+}
+
+describe('reconcileMatches', () => {
+  it('keeps all when every matched refid is still a withdrawal in the new ledger', () => {
+    const existing = new Map<string, KrakenMatch>([
+      ['n1', { refid: 'R1', amountBasis: 'net' }],
+      ['n2', { refid: 'R2', amountBasis: 'net-minus-fee' }],
+    ]);
+    const ledger = [withdrawal('R1', BLOCK_TIME, 1, 0), withdrawal('R2', BLOCK_TIME, 2, 0)];
+    const { kept, droppedRefids } = reconcileMatches(existing, ledger);
+    expect(kept).toEqual(existing);
+    expect(droppedRefids).toEqual([]);
+  });
+
+  it('drops all when no matched refid appears in the new ledger', () => {
+    const existing = new Map<string, KrakenMatch>([['n1', { refid: 'R1', amountBasis: 'net' }]]);
+    const ledger = [withdrawal('R9', BLOCK_TIME, 1, 0)];
+    const { kept, droppedRefids } = reconcileMatches(existing, ledger);
+    expect(kept.size).toBe(0);
+    expect(droppedRefids).toEqual(['R1']);
+  });
+
+  it('partitions a mixed set correctly', () => {
+    const existing = new Map<string, KrakenMatch>([
+      ['n1', { refid: 'R1', amountBasis: 'net' }],
+      ['n2', { refid: 'R2', amountBasis: 'net' }],
+      ['n3', { refid: 'R3', amountBasis: 'net' }],
+    ]);
+    const ledger = [withdrawal('R1', BLOCK_TIME, 1, 0), withdrawal('R3', BLOCK_TIME, 3, 0)];
+    const { kept, droppedRefids } = reconcileMatches(existing, ledger);
+    expect([...kept.keys()].sort()).toEqual(['n1', 'n3']);
+    expect(droppedRefids).toEqual(['R2']);
+  });
+
+  it('drops a refid that now appears only as a non-withdrawal row', () => {
+    const existing = new Map<string, KrakenMatch>([['n1', { refid: 'R1', amountBasis: 'net' }]]);
+    const ledger = [trade('R1')]; // same refid, but re-typed as a trade, not a withdrawal
+    const { kept, droppedRefids } = reconcileMatches(existing, ledger);
+    expect(kept.size).toBe(0);
+    expect(droppedRefids).toEqual(['R1']);
+  });
+
+  it('re-uploading an identical ledger keeps everything and drops nothing', () => {
+    const existing = new Map<string, KrakenMatch>([
+      ['n1', { refid: 'R1', amountBasis: 'net' }],
+      ['n2', { refid: 'R2', amountBasis: 'net-plus-fee' }],
+    ]);
+    const ledger = [withdrawal('R1', BLOCK_TIME, 1, 0), withdrawal('R2', BLOCK_TIME, 2, 0)];
+    const { kept, droppedRefids } = reconcileMatches(existing, ledger);
+    expect(kept).toEqual(existing);
+    expect(droppedRefids).toEqual([]);
+  });
+
+  it('property: kept is a subset of existing, every kept refid is a withdrawal refid of the ledger, and kept ∪ dropped covers existing exactly', () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.string({ minLength: 1, maxLength: 5 }), { minLength: 0, maxLength: 8 }),
+        fc.uniqueArray(fc.string({ minLength: 1, maxLength: 5 }), { minLength: 0, maxLength: 8 }),
+        (existingRefids, ledgerWithdrawalRefids) => {
+          const existing = new Map<string, KrakenMatch>(
+            existingRefids.map((refid, i) => [`n${i}`, { refid, amountBasis: 'net' as const }])
+          );
+          const ledger = ledgerWithdrawalRefids.map((refid) => withdrawal(refid, BLOCK_TIME, 1, 0));
+          const { kept, droppedRefids } = reconcileMatches(existing, ledger);
+
+          const withdrawalRefidSet = new Set(ledgerWithdrawalRefids);
+          for (const match of kept.values()) {
+            expect(withdrawalRefidSet.has(match.refid)).toBe(true);
+          }
+          for (const [nodeId, match] of kept) {
+            expect(existing.get(nodeId)).toEqual(match);
+          }
+          const coveredRefids = new Set([
+            ...[...kept.values()].map((m) => m.refid),
+            ...droppedRefids,
+          ]);
+          expect(coveredRefids).toEqual(new Set(existingRefids));
+          expect(kept.size + droppedRefids.length).toBe(existing.size);
+        }
+      )
+    );
   });
 });
