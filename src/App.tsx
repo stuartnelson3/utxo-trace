@@ -342,16 +342,19 @@ const App: React.FC = () => {
   };
 
   // Unified CSV loader — auto-detects Kraken ledger/trades and Swan trades/transfers/withdrawals.
-  // All exchange files can be loaded in one shot.
+  // All exchange files can be loaded in one shot, across multiple accounts:
+  // each matched type accumulates every file of that type (a user with two
+  // Swan accounts uploads two transfers + two withdrawals files, all of
+  // which must be combined, not just the last one processed).
   const handleCsvFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setCsvLoading(true);
 
-    let krakenLedgerText = '';
-    let krakenTradesText = '';
-    let swanTradesText = '';
-    let swanTransfersText = '';
-    let swanWithdrawalsText = '';
+    const krakenLedgerTexts: string[] = [];
+    const krakenTradesTexts: string[] = [];
+    const swanTradesTexts: string[] = [];
+    const swanTransfersTexts: string[] = [];
+    const swanWithdrawalsTexts: string[] = [];
     const names: string[] = [];
 
     for (const file of Array.from(files)) {
@@ -359,19 +362,19 @@ const App: React.FC = () => {
       const krakenType = detectCsvType(text);
       const swanType = detectSwanCsvType(text);
       if (krakenType === 'ledger') {
-        krakenLedgerText = text;
+        krakenLedgerTexts.push(text);
         names.push(file.name);
       } else if (krakenType === 'trades') {
-        krakenTradesText = text;
+        krakenTradesTexts.push(text);
         names.push(file.name);
       } else if (swanType === 'swan-trades') {
-        swanTradesText = text;
+        swanTradesTexts.push(text);
         names.push(file.name);
       } else if (swanType === 'swan-transfers') {
-        swanTransfersText = text;
+        swanTransfersTexts.push(text);
         names.push(file.name);
       } else if (swanType === 'swan-withdrawals') {
-        swanWithdrawalsText = text;
+        swanWithdrawalsTexts.push(text);
         names.push(file.name);
       }
     }
@@ -379,17 +382,22 @@ const App: React.FC = () => {
     const warnings: string[] = [];
 
     // --- Kraken ---
-    if (krakenLedgerText) {
+    if (krakenLedgerTexts.length > 0) {
       try {
-        const ledger = parseKrakenLedger(krakenLedgerText);
-        const trades = krakenTradesText ? parseKrakenTrades(krakenTradesText) : new Map();
+        const ledger = krakenLedgerTexts
+          .flatMap((t) => parseKrakenLedger(t))
+          .sort((a, b) => a.time.getTime() - b.time.getTime());
+        const trades = new Map<string, TradeEntry>();
+        for (const t of krakenTradesTexts) {
+          for (const [k, v] of parseKrakenTrades(t)) trades.set(k, v);
+        }
         const raw = buildAttributions(ledger, trades);
         const filled = await fillMissingPrices(raw, fetchRawBtcUsd, fetchUsdToEurRate);
         setKrakenLedger(ledger);
         setKrakenTrades(trades);
         setKrakenAttributions(filled);
         setKrakenMatches(new Map()); // clear stale matches when CSV reloaded
-        setKrakenSummary(krakenTradesText ? 'ledger + trades' : 'ledger');
+        setKrakenSummary(krakenTradesTexts.length > 0 ? 'ledger + trades' : 'ledger');
       } catch (err) {
         console.error('Kraken CSV error:', err);
         warnings.push('failed to parse Kraken CSV — check file format');
@@ -399,15 +407,15 @@ const App: React.FC = () => {
     // --- Swan ---
     let swanLots: SwanLot[] = [];
     let swanLotSource = '';
-    if (swanTransfersText && swanTradesText) {
+    if (swanTransfersTexts.length > 0 && swanTradesTexts.length > 0) {
       warnings.push('both trades and transfers detected (redundant): using transfers');
     }
     try {
-      if (swanTransfersText) {
-        swanLots = parseSwanTransfers(swanTransfersText);
+      if (swanTransfersTexts.length > 0) {
+        swanLots = swanTransfersTexts.flatMap((t) => parseSwanTransfers(t));
         swanLotSource = 'transfers';
-      } else if (swanTradesText) {
-        swanLots = parseSwanTrades(swanTradesText);
+      } else if (swanTradesTexts.length > 0) {
+        swanLots = swanTradesTexts.flatMap((t) => parseSwanTrades(t));
         swanLotSource = 'trades';
       }
     } catch (err) {
@@ -415,7 +423,7 @@ const App: React.FC = () => {
       warnings.push('failed to parse Swan CSV — check file format');
     }
     const hasSwanLots = swanLots.length > 0;
-    const hasSwanWithdrawals = !!swanWithdrawalsText;
+    const hasSwanWithdrawals = swanWithdrawalsTexts.length > 0;
 
     if (hasSwanLots && !hasSwanWithdrawals) {
       warnings.push(`swan ${swanLotSource} detected — withdrawals CSV also required`);
@@ -425,7 +433,7 @@ const App: React.FC = () => {
     }
     if (hasSwanLots && hasSwanWithdrawals) {
       try {
-        const withdrawals = parseSwanWithdrawals(swanWithdrawalsText);
+        const withdrawals = swanWithdrawalsTexts.flatMap((t) => parseSwanWithdrawals(t));
         setSwanLotsState(swanLots);
         setSwanWithdrawalsState(withdrawals);
         setSwanAttributions(buildSwanAttributions(swanLots, withdrawals));
