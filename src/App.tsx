@@ -810,8 +810,11 @@ const App: React.FC = () => {
               </span>
             )}
 
-            {/* Currency toggle */}
-            <div style={{ display: 'flex', gap: 4 }}>
+            {/* Currency toggle — also selects the tax rule set, not just formatting */}
+            <div
+              style={{ display: 'flex', gap: 4 }}
+              title="also selects the tax rule set: EUR applies the German one-year holding exemption, USD applies US long/short-term capital gains (see the report's methodology appendix)"
+            >
               {(['USD', 'EUR'] as DisplayCurrency[]).map((c) => (
                 <button
                   key={c}
@@ -830,15 +833,18 @@ const App: React.FC = () => {
               ))}
             </div>
 
+            {/* Advanced/rare — visually quieter than the controls above so the
+                primary flow (csv, currency, trace) isn't competing with it. */}
             <button
               onClick={() => setShowDataSources(!showDataSources)}
+              title="optional: use a self-hosted Esplora node instead of mempool.space, or cross-check prices against Kraken"
               style={{
                 font: '14px/1.7 monospace',
                 border: '1px solid var(--border)',
                 padding: '0 8px',
                 cursor: 'pointer',
                 background: 'var(--bg)',
-                color: 'var(--fg)',
+                color: 'var(--muted)',
               }}
             >
               [data sources]
@@ -847,14 +853,14 @@ const App: React.FC = () => {
             {rootNode && (
               <button
                 onClick={handleExportSession}
-                title="the exported file contains your transaction graph and parsed exchange history — treat it like a bank statement"
+                title="save your progress to a file — the exported file contains your transaction graph and parsed exchange history, treat it like a bank statement"
                 style={{
                   font: '14px/1.7 monospace',
                   border: '1px solid var(--border)',
                   padding: '0 8px',
                   cursor: 'pointer',
                   background: 'var(--bg)',
-                  color: 'var(--fg)',
+                  color: 'var(--muted)',
                 }}
               >
                 [export session]
@@ -873,13 +879,14 @@ const App: React.FC = () => {
             />
             <button
               onClick={() => sessionFileRef.current?.click()}
+              title="resume a previously saved session file"
               style={{
                 font: '14px/1.7 monospace',
                 border: '1px solid var(--border)',
                 padding: '0 8px',
                 cursor: 'pointer',
                 background: 'var(--bg)',
-                color: 'var(--fg)',
+                color: 'var(--muted)',
               }}
             >
               [import session]
@@ -947,6 +954,12 @@ const App: React.FC = () => {
             </span>
           )}
         </form>
+        {!rootNode && !pendingOutputs && (
+          <p style={{ margin: '6px 0 0', color: 'var(--muted)', fontSize: 12 }}>
+            paste the ID of the Bitcoin transaction that sent you the coins you want to trace — find
+            it in your wallet's transaction history or on a block explorer.
+          </p>
+        )}
 
         {/* Warnings */}
         {swanWarnings.length > 0 && (
@@ -973,6 +986,10 @@ const App: React.FC = () => {
             }}
           >
             select output for audit
+          </p>
+          <p style={{ margin: '0 0 12px', color: 'var(--muted)', fontSize: 12 }}>
+            pick the output whose amount matches what arrived in your wallet — usually the one sent
+            to your own address below.
           </p>
           {pendingOutputs.map((output, index) => (
             <div key={index} style={{ marginBottom: 4 }}>
@@ -1038,8 +1055,10 @@ const App: React.FC = () => {
                 </div>
                 <button
                   onClick={() => handlePrint()}
+                  title="generates the printable audit report — the document to hand to a tax preparer"
                   style={{
                     font: '14px/1.7 monospace',
+                    fontWeight: 'bold',
                     border: '1px solid var(--border)',
                     background: 'var(--bg)',
                     color: 'var(--fg)',
@@ -1106,6 +1125,10 @@ const App: React.FC = () => {
               </div>
             </div>
 
+            <div style={{ marginBottom: 12 }}>
+              <Legend />
+            </div>
+
             <UTXONode
               node={rootNode}
               expandedIds={expandedIds}
@@ -1133,11 +1156,6 @@ const App: React.FC = () => {
           fontSize: 12,
         }}
       >
-        {rootNode && (
-          <div style={{ marginBottom: 12 }}>
-            <Legend />
-          </div>
-        )}
         not financial or tax advice. blockchain prices from{' '}
         <a href="https://mempool.space" target="_blank">
           mempool.space

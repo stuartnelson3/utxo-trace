@@ -106,6 +106,13 @@ describe('offline replay', () => {
     expect(html).toContain('change output returned to sender');
     // Mass-balance reconciliation line.
     expect(html).toContain('traced inputs');
+    // Plain-language framing sentence, read before any table or citation.
+    expect(html).toContain('In short:');
+    // Legend must be defined before the first ✓/~/! or >1y/<1y symbol appears
+    // (in the acquisition-sources section), not after it.
+    expect(html.indexOf('csv-verified')).toBeLessThan(html.indexOf('acquisition sources'));
+    // SHA256/lineage lines are clearly marked as optional technical detail.
+    expect(html).toContain('technical verification (optional)');
 
     expect(fetchSpy).not.toHaveBeenCalled();
 

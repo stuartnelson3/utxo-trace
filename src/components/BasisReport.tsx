@@ -22,13 +22,24 @@ interface Props {
   bundleHash: string | null;
 }
 
-const Row: React.FC<{ label: string; value: React.ReactNode; muted?: boolean }> = ({
-  label,
-  value,
-  muted,
-}) => (
+// `headline` marks the handful of numbers a reader should see first — proceeds,
+// basis, gain/loss. Everything else in the summary table is supporting detail
+// at the same, smaller weight, so the headline rows need to stand apart
+// visually rather than reading as one more line in a flat list.
+const Row: React.FC<{
+  label: string;
+  value: React.ReactNode;
+  muted?: boolean;
+  headline?: boolean;
+}> = ({ label, value, muted, headline }) => (
   <div
-    style={{ display: 'flex', gap: 16, borderBottom: '1px solid var(--border)', padding: '4px 0' }}
+    style={{
+      display: 'flex',
+      gap: 16,
+      borderBottom: '1px solid var(--border)',
+      padding: headline ? '7px 0' : '4px 0',
+      fontSize: headline ? 15 : 'inherit',
+    }}
   >
     <span style={{ color: 'var(--muted)', minWidth: 180, flexShrink: 0 }}>{label}</span>
     <span style={{ color: muted ? 'var(--muted)' : 'inherit' }}>{value}</span>
@@ -98,6 +109,27 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
 
     const overrides = [...overrideRecords.values()].sort((a, b) => a.assertedAt - b.assertedAt);
 
+    // Plain-language framing before any table or legal citation — the reader
+    // (often a non-technical, older CPA/Steuerberater) should be able to get
+    // the gist from one sentence before working through the supporting detail.
+    const btcAmount = (rootNode.amountSats / 1e8).toFixed(8);
+    const hasExempt = exemptBasis > 0;
+    const hasTaxable = taxableBasis > 0.005; // ignore float noise around a fully-exempt total
+    const holdingNote = hasExempt
+      ? hasTaxable
+        ? ' Part of the basis is tax-exempt (held over one year) and part is taxable (held one year or less) — see the >1y/<1y marks below.'
+        : ' The full basis is tax-exempt: every lot was held over one year.'
+      : hasTaxable
+        ? ' The full basis is taxable: no lot was held over one year.'
+        : '';
+    const summarySentence = `In short: this report traces ${btcAmount} BTC ${
+      disposalDate
+        ? `disposed of on ${formatDate(new Date(disposalDate), displayCurrency)}`
+        : "(using today's price — no disposal date is set yet)"
+    } back to its purchase history. It was sold for ${fmt(proceeds)} against a cost basis of ${fmt(
+      totalBasis
+    )}, a ${gainLoss >= 0 ? 'gain' : 'loss'} of ${fmt(Math.abs(gainLoss))}.${holdingNote}`;
+
     return (
       <div
         ref={ref}
@@ -121,6 +153,27 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           </code>
         </div>
 
+        {/* Plain-language summary — read this first */}
+        <div
+          style={{
+            background: '#f5f5f5',
+            border: '1px solid #ccc',
+            padding: '10px 14px',
+            marginBottom: 20,
+            fontSize: 13,
+            lineHeight: 1.6,
+          }}
+        >
+          {summarySentence}
+        </div>
+
+        {/* Legend — defined here, before any ✓/~/! symbol or >1y/<1y badge
+            appears below, so the reader isn't decoding marks it hasn't
+            explained yet. */}
+        <div style={{ marginBottom: 20 }}>
+          <Legend dark={false} />
+        </div>
+
         {/* Summary table */}
         <div style={{ marginBottom: 20 }}>
           {disposalDate && (
@@ -130,6 +183,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
             />
           )}
           <Row
+            headline
             label="disposal proceeds"
             value={
               <>
@@ -142,6 +196,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           />
           <Row label="@ unit price" value={`${fmt(rootUnitPrice)}/BTC`} muted />
           <Row
+            headline
             label="acquisition basis"
             value={
               <>
@@ -168,9 +223,10 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
             />
           )}
           <Row
+            headline
             label={gainLoss >= 0 ? 'realized gain' : 'realized loss'}
             value={
-              <strong style={{ color: gainLoss >= 0 ? '#060' : '#c00' }}>
+              <strong style={{ color: gainLoss >= 0 ? '#060' : '#c00', fontSize: 17 }}>
                 {gainLoss >= 0 ? '▲ ' : '▼ '}
                 {fmt(Math.abs(gainLoss))}
               </strong>
@@ -468,6 +524,10 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           >
             methodology
           </div>
+          <div style={{ fontSize: 11, color: '#333', marginBottom: 8 }}>
+            The figures above were calculated as described below, with the applicable tax rule cited
+            for each jurisdiction — for reference if a figure needs to be checked or challenged.
+          </div>
           <div style={{ fontSize: 10, color: '#333', lineHeight: 1.6 }}>
             <div>
               <strong>price source:</strong> {METHODOLOGY.priceOracle.source};{' '}
@@ -529,16 +589,11 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           </div>
         </div>
 
-        {/* Legend */}
-        <div style={{ marginBottom: 12 }}>
-          <Legend dark={false} />
-        </div>
-
-        {/* Evidence bundle */}
+        {/* Evidence bundle — technical/optional: safe to skip on a first read */}
         {bundleHash && (
           <div style={{ fontSize: 10, color: '#999', marginBottom: 12 }}>
-            evidence bundle sha256 {bundleHash} · app {__APP_VERSION__} · commit {__COMMIT__} ·
-            methodology v{METHODOLOGY.version}
+            technical verification (optional): evidence bundle sha256 {bundleHash} · app{' '}
+            {__APP_VERSION__} · commit {__COMMIT__} · methodology v{METHODOLOGY.version}
           </div>
         )}
 
@@ -554,8 +609,8 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
           }}
         >
           <div style={{ fontSize: 10, color: '#555', flex: 1 }}>
-            lineage verified. attribution sum [{(rootNode.amountSats / 1e8).toFixed(8)} BTC] matches
-            disposal amount.
+            technical verification (optional): lineage verified, attribution sum [
+            {(rootNode.amountSats / 1e8).toFixed(8)} BTC] matches disposal amount.
           </div>
           <div style={{ fontSize: 10, color: '#999', flexShrink: 0 }}>
             {formatDate(new Date(), displayCurrency)}

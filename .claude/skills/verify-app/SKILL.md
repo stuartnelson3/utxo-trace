@@ -22,14 +22,14 @@ pkill -f 'vite --port 5179'
 To check a deployed URL instead of a local dev server:
 
 ```bash
-SMOKE_TEST_URL=https://stuartnelson3.github.io/utxo-trace/ node scripts/smoke-test.mjs
+SMOKE_TEST_URL=https://stuartnelson.xyz/utxo-trace/ node scripts/smoke-test.mjs
 ```
 
 **Pass criteria:**
 - Basis is a non-zero EUR figure
 - `disposed:` row present (disposal date/price UI)
 - `[load exchange csv]` button present
-- `[§23 ✓]` holding-period badge visible on root node (July 2023 tx is >1yr old)
+- `[>1y ✓]` holding-period badge visible on root node (July 2023 tx is >1yr old)
 - `#0` vout shown on root node card
 - Node count: 1 → >1 on expand → 1 on collapse
 - No console errors
