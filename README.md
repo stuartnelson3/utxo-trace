@@ -72,10 +72,13 @@ node card, with a source-quality badge:
 
 ## Threat / trust model
 
-Nothing leaves the browser except two read-only API calls:
+Nothing leaves the browser except read-only API calls to:
 
 - `mempool.space` — transaction data and historical BTC/USD daily prices
+  (or a self-hosted Esplora/electrs-compatible endpoint you configure
+  instead, via the app's "data sources" panel)
 - `api.frankfurter.dev` — ECB daily USD→EUR reference rate
+- `api.kraken.com` — optional, only if you enable price cross-checking
 
 There is no backend, no accounts, and no stored data (no localStorage,
 indexedDB, or sessionStorage). Exchange CSVs are parsed entirely in-browser
@@ -86,14 +89,57 @@ This is enforced by a strict CSP, not just by convention:
 ```
 default-src 'self'; script-src 'self';
 connect-src https://mempool.space https://api.frankfurter.dev
+  https://api.kraken.com http://localhost:* http://127.0.0.1:*
   ws://localhost:* ws://127.0.0.1:*;
 style-src 'self' 'unsafe-inline'; img-src 'self' data:
 ```
 
-What's trusted: mempool.space for tx data and price history, and the ECB
-(via frankfurter.dev) for the daily FX fixing. Neither is authenticated or
-independently verified today — a second price source for cross-checking and
-support for a self-hosted Esplora endpoint are on the roadmap.
+(`localhost`/`127.0.0.1` are always allowed for a self-hosted Esplora node;
+self-hosters extending this further set `VITE_EXTRA_CONNECT_SRC` at build
+time — see [Config](#config).)
+
+What's trusted: mempool.space (or your configured custom source) for tx
+data and price history, and the ECB (via frankfurter.dev) for the daily FX
+fixing. Neither is authenticated by default — enabling the optional Kraken
+OHLC cross-check surfaces divergences between the two price sources in the
+report rather than silently trusting either one.
+
+### Verifying a deployed build matches this source
+
+Every deploy (CI: `.github/workflows/deploy.yml`) builds with
+`VITE_COMMIT_SHA` set to the triggering commit, which the app renders in
+its footer and in every printed report ("app v... · commit ..."). The
+build's own CSP is checked at build time (`scripts/check-dist-csp.mjs`) so
+a broken `%VITE_EXTRA_CONNECT_SRC%` substitution or an accidentally
+narrowed CSP fails CI rather than shipping quietly.
+
+To confirm the JS actually served at a given moment matches building this
+repo yourself at the commit shown in the footer (the asset filename is
+content-hashed by Vite, so this derives it rather than assuming one):
+
+```bash
+# 1. Find the deployed script's actual (content-hashed) path and hash it.
+DEPLOYED_JS=$(curl -s https://stuartnelson.xyz/utxo-trace/ | grep -oE 'assets/index-[^"]+\.js')
+curl -s "https://stuartnelson.xyz/utxo-trace/$DEPLOYED_JS" | sha256sum
+
+# 2. Build the exact same commit locally (read the sha from the site's
+#    own footer first) and compare.
+git checkout <commit-sha-from-the-footer>
+npm ci
+VITE_COMMIT_SHA=<commit-sha-from-the-footer> npm run build
+sha256sum "dist/$DEPLOYED_JS"
+# the two sha256sum outputs should be identical
+```
+
+Local-only variant (confirm your own build output against the checksum
+manifest CI produced for that commit's run, downloaded from the Actions
+run's artifacts as `dist-checksums.txt`):
+
+```bash
+npm run build
+(cd dist && find . -type f -exec sha256sum {} \;) > /tmp/local-checksums.txt
+diff /tmp/local-checksums.txt dist-checksums.txt
+```
 
 ## Methodology
 
