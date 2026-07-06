@@ -1,7 +1,7 @@
 import React, { forwardRef } from 'react';
 import { UTXONode } from '../core/types';
 import { ScaledLeaf, nodePrice, leafBasis, findNode } from '../core/tree';
-import { isPara23Exempt } from '../core/holding';
+import { isHeldOverOneYear } from '../core/holding';
 import { formatDate, formatCurrency } from '../config';
 import { useTraceContext } from '../TraceContext';
 import { krakenToLotRows } from '../core/kraken';
@@ -86,7 +86,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
     const gainLoss = proceeds - totalBasis;
 
     const exemptBasis = leaves.reduce((sum, leaf) => {
-      if (!isPara23Exempt(leaf.node.timestamp, disposalTimestamp)) return sum;
+      if (!isHeldOverOneYear(leaf.node.timestamp, disposalTimestamp)) return sum;
       return sum + leafBasis(leaf, displayCurrency);
     }, 0);
     const taxableBasis = totalBasis - exemptBasis;
@@ -206,7 +206,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
             const { node, scaledSats, basisOverride } = leaf;
             const scaledBTC = scaledSats / 1e8;
             const basis = leafBasis(leaf, displayCurrency);
-            const exempt = isPara23Exempt(node.timestamp, disposalTimestamp);
+            const heldOverOneYear = isHeldOverOneYear(node.timestamp, disposalTimestamp);
 
             // Look up attribution for lot table rendering (mirrors UTXONode logic).
             // Swan: automatic by txid. Kraken: explicit by user-confirmed match.
@@ -245,10 +245,10 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
                         acquired: {formatDate(new Date(node.timestamp * 1000), displayCurrency)}
                       </span>
                       {disposalTimestamp > 0 && (
-                        <span style={{ color: exempt ? '#060' : '#b60', fontSize: 11 }}>
-                          {exempt
-                            ? METHODOLOGY.holdingPeriodLabels[displayCurrency].badgeExempt
-                            : METHODOLOGY.holdingPeriodLabels[displayCurrency].badgeNotExempt}
+                        <span style={{ color: heldOverOneYear ? '#060' : '#b60', fontSize: 11 }}>
+                          {heldOverOneYear
+                            ? METHODOLOGY.holdingPeriodBadge.over
+                            : METHODOLOGY.holdingPeriodBadge.under}
                         </span>
                       )}
                       {node.memo && (

@@ -70,4 +70,24 @@ describe('honest labeling', () => {
     // ...and the US label explicitly disclaims being a spec-ID election.
     expect(METHODOLOGY.labels.en_usd).toMatch(/not itself a specific-ID election/);
   });
+
+  // Per-row/per-node badges assert a duration (">1y"), never a jurisdiction's
+  // legal conclusion about it — "§23" (or any other jurisdiction-specific
+  // citation) belongs only in methodology.ts's own text, rendered once in
+  // the appendix, never hardcoded into a component as a per-row literal.
+  // holding.ts is also exempt: its doc comment cites the statute to explain
+  // isHeldOverOneYear's legal grounding for future maintainers — that's
+  // source documentation, not a user-facing string a component renders.
+  it('"§23" appears nowhere in src/ outside methodology.ts and holding.ts', () => {
+    const offenders = Object.entries(allSrc)
+      .filter(([file]) => !file.includes('methodology.ts') && !file.includes('holding.ts'))
+      .filter(([, text]) => text.includes('§23'))
+      .map(([file]) => file);
+    expect(offenders).toEqual([]);
+  });
+
+  it('holding-period badges are a single currency-independent pair', () => {
+    expect(METHODOLOGY.holdingPeriodBadge.over).not.toMatch(/§23|long-term|short-term/);
+    expect(METHODOLOGY.holdingPeriodBadge.under).not.toMatch(/§23|long-term|short-term/);
+  });
 });

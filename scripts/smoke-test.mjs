@@ -45,8 +45,8 @@ try {
   const csvBtn = await page.locator('button:has-text("[load exchange csv]")').count();
   console.log('CSV button present (expect 1):', csvBtn);
 
-  const badge = await page.locator('text=[§23 ✓]').count();
-  console.log('§23 badge present (expect 1):', badge);
+  const badge = await page.locator('text=[>1y ✓]').count();
+  console.log('holding-period badge present (expect 1):', badge);
 
   const vout = await page.locator('span:has-text("#0")').count();
   console.log('Vout #0 shown (expect >=1):', vout);
@@ -69,7 +69,7 @@ try {
   const failures = [];
   if (disposedLabel !== 1) failures.push('disposal row missing');
   if (csvBtn !== 1) failures.push('csv button missing');
-  if (badge < 1) failures.push('§23 badge missing');
+  if (badge < 1) failures.push('holding-period badge missing');
   if (vout < 1) failures.push('vout #0 missing');
   if (nodesBefore !== 1) failures.push('expected 1 node before expand');
   if (nodesAfter <= 1) failures.push('expected >1 nodes after expand');

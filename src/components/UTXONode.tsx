@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { UTXONode as UTXONodeType } from '../core/types';
 import { formatCurrency, formatDate, DisplayCurrency } from '../config';
 import { nodePrice } from '../core/tree';
-import { isPara23Exempt } from '../core/holding';
+import { isHeldOverOneYear } from '../core/holding';
 import { useTraceContext } from '../TraceContext';
 import { krakenToLotRows } from '../core/kraken';
 import { swanToLotRows } from '../core/swan';
@@ -111,7 +111,7 @@ const UTXONode: React.FC<Props> = ({
   const isExpanded = expandedIds.has(node.id);
   const price = nodePrice(node, displayCurrency);
   const nodeBasis = ((node.amountSats || 0) / 1e8) * price;
-  const exempt = isPara23Exempt(node.timestamp, disposalTimestamp);
+  const heldOverOneYear = isHeldOverOneYear(node.timestamp, disposalTimestamp);
 
   const displayedOverride =
     node.isOverride && node.manualPriceUsd !== undefined
@@ -228,10 +228,15 @@ const UTXONode: React.FC<Props> = ({
               {formatDate(new Date(node.timestamp * 1000), displayCurrency)}
             </span>
             {disposalTimestamp > 0 && (
-              <span style={{ color: exempt ? 'var(--exempt)' : 'var(--taxable)', fontSize: 12 }}>
-                {exempt
-                  ? METHODOLOGY.holdingPeriodLabels[displayCurrency].badgeExempt
-                  : METHODOLOGY.holdingPeriodLabels[displayCurrency].badgeNotExempt}
+              <span
+                style={{
+                  color: heldOverOneYear ? 'var(--exempt)' : 'var(--taxable)',
+                  fontSize: 12,
+                }}
+              >
+                {heldOverOneYear
+                  ? METHODOLOGY.holdingPeriodBadge.over
+                  : METHODOLOGY.holdingPeriodBadge.under}
               </span>
             )}
             {node.isOverride && (

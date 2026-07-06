@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { isPara23Exempt } from './holding';
+import { isHeldOverOneYear } from './holding';
 
-// isPara23Exempt operates on local-time Date methods throughout (matching
+// isHeldOverOneYear operates on local-time Date methods throughout (matching
 // the app's own history), so the reference boundary here must too — mixing
 // Date.UTC with local getFullYear/setDate would misalign whenever the
 // runtime's timezone isn't UTC.
@@ -21,26 +21,26 @@ function firstExemptDayMs(acquisitionTs: number): number {
   return d.getTime();
 }
 
-describe('isPara23Exempt', () => {
+describe('isHeldOverOneYear', () => {
   it('is false when disposalTs is the "not set yet" sentinel (0)', () => {
-    expect(isPara23Exempt(1_700_000_000, 0)).toBe(false);
+    expect(isHeldOverOneYear(1_700_000_000, 0)).toBe(false);
   });
 
   it('treats acquisitionTs=0 as a real timestamp (epoch), not a sentinel', () => {
     // Acquired at epoch (1970), disposed decades later — well past a year.
-    expect(isPara23Exempt(0, 1_700_000_000)).toBe(true);
+    expect(isHeldOverOneYear(0, 1_700_000_000)).toBe(true);
   });
 
   it('boundary: any moment on the exact anniversary calendar day is NOT exempt', () => {
     const acq = localSeconds(2023, 4, 10, 0, 0, 0); // 2023-05-10
-    expect(isPara23Exempt(acq, localSeconds(2024, 4, 10, 0, 0, 0))).toBe(false);
-    expect(isPara23Exempt(acq, localSeconds(2024, 4, 10, 12, 0, 0))).toBe(false);
-    expect(isPara23Exempt(acq, localSeconds(2024, 4, 10, 23, 59, 59))).toBe(false);
+    expect(isHeldOverOneYear(acq, localSeconds(2024, 4, 10, 0, 0, 0))).toBe(false);
+    expect(isHeldOverOneYear(acq, localSeconds(2024, 4, 10, 12, 0, 0))).toBe(false);
+    expect(isHeldOverOneYear(acq, localSeconds(2024, 4, 10, 23, 59, 59))).toBe(false);
   });
 
   it('boundary: the day after the anniversary IS exempt, from its first moment', () => {
     const acq = localSeconds(2023, 4, 10, 0, 0, 0);
-    expect(isPara23Exempt(acq, localSeconds(2024, 4, 11, 0, 0, 0))).toBe(true);
+    expect(isHeldOverOneYear(acq, localSeconds(2024, 4, 11, 0, 0, 0))).toBe(true);
   });
 
   it('handles a Feb 29 acquisition (leap year) correctly', () => {
@@ -49,8 +49,8 @@ describe('isPara23Exempt', () => {
     // boundary is the day after that.
     const justBefore = firstExemptDayMs(acq) / 1000 - 1;
     const justAfter = firstExemptDayMs(acq) / 1000;
-    expect(isPara23Exempt(acq, justBefore)).toBe(false);
-    expect(isPara23Exempt(acq, justAfter)).toBe(true);
+    expect(isHeldOverOneYear(acq, justBefore)).toBe(false);
+    expect(isHeldOverOneYear(acq, justAfter)).toBe(true);
   });
 
   it('property: exempt on/after the first-exempt-day boundary, not exempt before it', () => {
@@ -62,7 +62,7 @@ describe('isPara23Exempt', () => {
           const boundaryMs = firstExemptDayMs(acquisitionTs);
           const disposalTs = Math.floor(boundaryMs / 1000) + offsetSeconds;
           const expected = disposalTs * 1000 >= boundaryMs;
-          expect(isPara23Exempt(acquisitionTs, disposalTs)).toBe(expected);
+          expect(isHeldOverOneYear(acquisitionTs, disposalTs)).toBe(expected);
         }
       )
     );

@@ -74,21 +74,29 @@ export const METHODOLOGY = {
       'FIFO-Verbrauchsfolge je Börsenkonto (BMF-Schreiben v. 10.05.2022, ' +
       'Rz. 61); Zuordnung on-chain per Einzelnachweis',
   },
-  // Holding-period vocabulary per display currency — centralized so a
-  // report/badge label can never drift from which jurisdiction's rule
-  // actually produced the exemption (rule_de vs rule_us above).
+  // Per-row/per-node badges state a duration fact only — ">1y" is
+  // unconditionally true regardless of jurisdiction — never a jurisdiction's
+  // legal conclusion about that duration (whether >1y means "exempt" in
+  // Germany or "long-term rate" in the US is interpretation, not something
+  // isHeldOverOneYear proves). One pair, no currency lookup: a skeptical
+  // reviewer can't argue with a duration the way they could a legal label.
+  holdingPeriodBadge: {
+    over: '[>1y ✓]',
+    under: '[<1y]',
+  },
+  // Summary rows aggregate basis by that same duration and DO name the
+  // jurisdiction-specific bucket, since the split is only meaningful in
+  // light of rule_de/rule_us above — but point to the appendix rather than
+  // repeating the legal citation inline (the appendix is the one place the
+  // §23/long-term distinction is actually asserted, with citations).
   holdingPeriodLabels: {
     EUR: {
-      rowExempt: '§23 EStG exempt basis (>1yr)',
+      rowExempt: 'exempt basis (>1yr, see appendix)',
       rowTaxable: 'taxable basis (≤1yr)',
-      badgeExempt: '[§23 ✓]',
-      badgeNotExempt: '[<1yr]',
     },
     USD: {
-      rowExempt: 'long-term basis (>1yr)',
+      rowExempt: 'long-term basis (>1yr, see appendix)',
       rowTaxable: 'short-term basis (≤1yr)',
-      badgeExempt: '[long-term]',
-      badgeNotExempt: '[short-term]',
     },
   } satisfies Record<DisplayCurrency, Record<string, string>>,
 } as const;

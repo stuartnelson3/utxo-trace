@@ -48,10 +48,15 @@ describe('default report vocabulary resolves from APP_CONFIG.CURRENCY', () => {
     expect(subtitle).toBe(METHODOLOGY.labels.en_eur);
   });
 
-  it('holding-period vocabulary resolves to the §23 set by default', () => {
+  it('holding-period summary-row vocabulary resolves to the EUR set by default', () => {
     const labels = METHODOLOGY.holdingPeriodLabels[APP_CONFIG.CURRENCY];
     expect(labels).toBe(METHODOLOGY.holdingPeriodLabels.EUR);
-    expect(labels.badgeExempt).toBe('[§23 ✓]');
+    expect(labels.rowExempt).toBe('exempt basis (>1yr, see appendix)');
+  });
+
+  it('holding-period badge is a single pair, independent of display currency', () => {
+    expect(METHODOLOGY.holdingPeriodBadge.over).toBe('[>1y ✓]');
+    expect(METHODOLOGY.holdingPeriodBadge.under).toBe('[<1y]');
   });
 });
 
