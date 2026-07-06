@@ -33,6 +33,29 @@ Run `/verify-app` after any substantial change, or when explicitly asked. Not re
 
 The skill is at `.claude/skills/verify-app/SKILL.md` — it drives a full Playwright smoke test against a real transaction and checks basis loading, expand/collapse, and console errors.
 
+## Releasing
+
+Releases are cut manually, only when explicitly asked — this repo deploys
+continuously on every push to `main`, so releases are a curated "what's
+landed" marker, not a deploy mechanism (no workflow reacts to tags).
+
+```bash
+git checkout main && git pull --ff-only origin main
+npm version minor -m "release v%s"   # patch/minor/major by judgment;
+                                      # default to minor if unsure —
+                                      # no external semver consumers
+git push --follow-tags origin main
+```
+
+Wait for `deploy.yml` to finish (the build embeds the new version/commit
+automatically), then draft release notes from `git log vPREV..HEAD
+--oneline`, condense to a short curated summary (not a raw commit dump —
+this repo's commit messages are terse/internal), and:
+
+```bash
+gh release create vX.Y.Z --title "vX.Y.Z" --notes-file <scratch-file>
+```
+
 ## Planning convention
 
 Before writing non-trivial code, plan using the **simple-made-easy** skill at `~/notes/skills/simple-made-easy`. Name the concerns in play, find the braids, and prefer simple (unentangled) over easy (familiar) before committing to an approach.

@@ -141,6 +141,11 @@ npm run build
 diff /tmp/local-checksums.txt dist-checksums.txt
 ```
 
+Releases are cut manually (not on every commit — see `CLAUDE.md`'s
+"Releasing" section for the exact recipe); tags and release notes at
+[github.com/stuartnelson3/utxo-trace/releases](https://github.com/stuartnelson3/utxo-trace/releases)
+are the changelog of record — there is no separate CHANGELOG.md.
+
 ## Methodology
 
 Every rule that affects a number in the report — the price snap time, the
