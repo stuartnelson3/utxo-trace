@@ -18,10 +18,10 @@ import {
   getCrossCheckStats,
   priceDivergences,
   exportCaches,
-  importCaches,
 } from './api';
 import { probeEsploraEndpoint } from './providers/customEsplora';
 import { EvidenceBundle, hashBundle, migrate } from './core/bundle';
+import { loadSession } from './sessionReplay';
 import {
   collectLeaves,
   collectExcluded,
@@ -720,62 +720,40 @@ const App: React.FC = () => {
       setCustomEsploraSource(null);
     }
 
-    importCaches({
-      txCache: bundle.txCache,
-      priceCache: bundle.priceCache,
-      fxCache: bundle.fxCache,
-    });
-
-    setKrakenLedger(bundle.krakenLedger.map((e) => ({ ...e, time: new Date(e.time) })));
-    setKrakenTrades(new Map(bundle.krakenTrades.map((t) => [t.txid, t])));
-    setSwanLotsState(bundle.swanLots.map((l) => ({ ...l, date: new Date(l.date) })));
-    setSwanWithdrawalsState(bundle.swanWithdrawals.map((w) => ({ ...w, date: new Date(w.date) })));
-
-    if (bundle.krakenLedger.length > 0) {
-      const ledger = bundle.krakenLedger.map((e) => ({ ...e, time: new Date(e.time) }));
-      const trades = new Map(bundle.krakenTrades.map((t) => [t.txid, t]));
-      const raw = buildAttributions(ledger, trades);
-      // Prices are already resolved in the ledger/trades data (or served
-      // from the imported price/fx caches below) — no network needed.
-      const filled = await fillMissingPrices(raw, fetchRawBtcUsd, fetchUsdToEurRate);
-      setKrakenAttributions(filled);
-      setKrakenSummary(bundle.krakenTrades.length > 0 ? 'ledger + trades' : 'ledger');
-    }
-    if (bundle.swanLots.length > 0 && bundle.swanWithdrawals.length > 0) {
-      const lots = bundle.swanLots.map((l) => ({ ...l, date: new Date(l.date) }));
-      const withdrawals = bundle.swanWithdrawals.map((w) => ({ ...w, date: new Date(w.date) }));
-      setSwanAttributions(buildSwanAttributions(lots, withdrawals));
-      setSwanSummary('imported');
-    }
-
-    setKrakenMatches(
-      new Map(bundle.matches.map((m) => [m.nodeId, { refid: m.refid, amountBasis: m.amountBasis }]))
-    );
-    setOverrideRecords(new Map(bundle.overrides.map((o) => [o.nodeId, o])));
-    setPruneRecords(new Map(bundle.prunedBranches.map((p) => [p.nodeId, p])));
-
-    setSearchTxid(bundle.inputs.rootTxid);
-    setSelectedVout(bundle.inputs.selectedVout);
-    if (bundle.inputs.disposal) {
-      setDisposalDate(new Date(bundle.inputs.disposal.timestamp * 1000).toISOString().slice(0, 10));
-      setDisposalPriceStr(bundle.inputs.disposal.priceDisplay?.toString() ?? '');
-    } else {
-      setDisposalDate('');
-      setDisposalPriceStr('');
-    }
-    setDisplayCurrency(bundle.inputs.disposal?.currency ?? APP_CONFIG.CURRENCY);
-    setExpandedIds(new Set());
-    pendingAutoExpand.current = bundle.tree.expandedIds;
-
-    const hash = await hashBundle(bundle);
-    setOfflineReplayHash(hash);
     setLoading(true);
     try {
-      const data = await fetchNodeData(bundle.inputs.rootTxid, bundle.inputs.selectedVout);
-      setRootNode(data);
+      const session = await loadSession(bundle);
+
+      setKrakenLedger(session.krakenLedger);
+      setKrakenTrades(session.krakenTrades);
+      setSwanLotsState(session.swanLots);
+      setSwanWithdrawalsState(session.swanWithdrawals);
+      if (session.krakenAttributions) {
+        setKrakenAttributions(session.krakenAttributions);
+        setKrakenSummary(session.krakenSummary);
+      }
+      if (session.swanAttributions) {
+        setSwanAttributions(session.swanAttributions);
+        setSwanSummary(session.swanSummary);
+      }
+      setKrakenMatches(session.krakenMatches);
+      setOverrideRecords(session.overrideRecords);
+      setPruneRecords(session.pruneRecords);
+
+      setSearchTxid(bundle.inputs.rootTxid);
+      setSelectedVout(bundle.inputs.selectedVout);
+      setDisposalDate(session.disposalDate);
+      setDisposalPriceStr(session.disposalPriceStr);
+      setDisplayCurrency(session.displayCurrency);
+      setExpandedIds(new Set());
+      pendingAutoExpand.current = session.expandedIds;
+
+      const hash = await hashBundle(bundle);
+      setOfflineReplayHash(hash);
+      setRootNode(session.rootNode);
     } catch (err) {
-      console.error('Session import: root node fetch failed:', err);
-      alert('Import failed: could not reconstruct the trace root from the bundle.');
+      console.error('Session import: reconstruction failed:', err);
+      alert('Import failed: could not reconstruct the trace from the bundle.');
     } finally {
       setLoading(false);
     }

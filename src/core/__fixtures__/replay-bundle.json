@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "app": {
+    "version": "1.0.0",
+    "commit": "fixture"
+  },
+  "createdAt": "2024-06-01T00:00:00.000Z",
+  "inputs": {
+    "rootTxid": "d41f5de48325e79070ccd3a23005f7a3b405f3ce1faa4df09f6d71770497e9d5",
+    "selectedVout": 0,
+    "disposal": {
+      "timestamp": 1717200000,
+      "priceDisplay": 55000,
+      "currency": "EUR"
+    }
+  },
+  "krakenLedger": [
+    {
+      "txid": "LEDGERTX0",
+      "refid": "R0",
+      "time": "2024-05-01T12:00:00.000Z",
+      "type": "receive",
+      "amountSats": 30000000,
+      "feeSats": 0
+    },
+    {
+      "txid": "LEDGERTX1",
+      "refid": "R1",
+      "time": "2024-05-11T10:00:00.000Z",
+      "type": "withdrawal",
+      "amountSats": -30000000,
+      "feeSats": 0
+    }
+  ],
+  "krakenTrades": [],
+  "swanLots": [
+    {
+      "date": "2024-01-15T00:00:00.000Z",
+      "btcSats": 25000000,
+      "priceUsd": 42000,
+      "source": "transfers"
+    }
+  ],
+  "swanWithdrawals": [
+    {
+      "txid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "btcSats": 25000000,
+      "date": "2024-05-10T00:00:00.000Z"
+    }
+  ],
+  "txCache": {
+    "mempool.space:d41f5de48325e79070ccd3a23005f7a3b405f3ce1faa4df09f6d71770497e9d5": {
+      "txid": "d41f5de48325e79070ccd3a23005f7a3b405f3ce1faa4df09f6d71770497e9d5",
+      "status": {
+        "block_time": 1690168629
+      },
+      "vin": [
+        {
+          "txid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "vout": 0
+        },
+        {
+          "txid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "vout": 0
+        },
+        {
+          "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "vout": 0
+        },
+        {
+          "txid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "vout": 0
+        }
+      ],
+      "vout": [
+        {
+          "value": 100000000,
+          "scriptpubkey_address": "bc1qexampleaddress2222222222222222222222"
+        }
+      ]
+    },
+    "mempool.space:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "txid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": {
+        "block_time": 1689900000
+      },
+      "vin": [],
+      "vout": [
+        {
+          "value": 30000000,
+          "scriptpubkey_address": "bc1qexampleaddress2222222222222222222222"
+        }
+      ]
+    },
+    "mempool.space:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+      "txid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "status": {
+        "block_time": 1689950000
+      },
+      "vin": [],
+      "vout": [
+        {
+          "value": 25000000,
+          "scriptpubkey_address": "bc1qexampleaddress2222222222222222222222"
+        }
+      ]
+    },
+    "mempool.space:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc": {
+      "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "status": {
+        "block_time": 1690000000
+      },
+      "vin": [],
+      "vout": [
+        {
+          "value": 20000000,
+          "scriptpubkey_address": "bc1qexampleaddress2222222222222222222222"
+        }
+      ]
+    },
+    "mempool.space:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+      "txid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "status": {
+        "block_time": 1690050000
+      },
+      "vin": [],
+      "vout": [
+        {
+          "value": 15000000,
+          "scriptpubkey_address": "bc1qexampleaddress2222222222222222222222"
+        }
+      ]
+    }
+  },
+  "priceCache": [
+    {
+      "source": "mempool.space",
+      "day": "2023-07-23",
+      "usd": 29178
+    },
+    {
+      "source": "mempool.space",
+      "day": "2023-07-20",
+      "usd": 29909
+    },
+    {
+      "source": "mempool.space",
+      "day": "2023-07-21",
+      "usd": 29795
+    },
+    {
+      "source": "mempool.space",
+      "day": "2023-07-22",
+      "usd": 29795
+    },
+    {
+      "source": "mempool.space",
+      "day": "2024-04-30",
+      "usd": 57828
+    }
+  ],
+  "fxCache": [
+    {
+      "day": "2023-07-24",
+      "usdToEur": 0.90123
+    },
+    {
+      "day": "2023-07-21",
+      "usdToEur": 0.89904
+    },
+    {
+      "day": "2023-07-22",
+      "usdToEur": 0.89904
+    },
+    {
+      "day": "2024-05-01",
+      "usdToEur": 0.93301
+    }
+  ],
+  "tree": {
+    "expandedIds": [
+      "d41f5de48325e79070ccd3a23005f7a3b405f3ce1faa4df09f6d71770497e9d5:0"
+    ]
+  },
+  "matches": [
+    {
+      "nodeId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0",
+      "refid": "R1",
+      "amountBasis": "net"
+    }
+  ],
+  "overrides": [
+    {
+      "nodeId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc:0",
+      "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "vout": 0,
+      "priceUsd": 45000,
+      "previousPriceUsd": 40000,
+      "previousSource": "mempool",
+      "memo": "manual verification via block explorer",
+      "assertedAt": 1717200000
+    }
+  ],
+  "prunedBranches": [
+    {
+      "nodeId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee:0",
+      "txid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "vout": 0,
+      "amountSats": 15000000,
+      "reason": "change output returned to sender",
+      "prunedAt": 1717200000
+    }
+  ],
+  "settings": {
+    "txSourceMode": "mempool",
+    "customEsploraUrl": "",
+    "priceCrossCheck": false
+  }
+}
