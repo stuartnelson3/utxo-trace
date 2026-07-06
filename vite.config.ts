@@ -12,6 +12,14 @@ import pkg from './package.json';
 export default defineConfig(({ command }) => ({
   test: {
     environment: 'node',
+    // BasisReport renders some timestamps via toLocaleString(), which reads
+    // the process's system timezone. Pinning it here (applied before the
+    // test process's Date/Intl machinery initializes) makes snapshot tests
+    // deterministic regardless of which machine or CI runner executes them —
+    // setting process.env.TZ from inside a test file is too late for this.
+    env: {
+      TZ: 'UTC',
+    },
   },
   plugins: [react()],
   // Production builds are served from /utxo-trace/ on the blog.

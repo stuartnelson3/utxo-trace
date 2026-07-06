@@ -198,7 +198,7 @@
       "previousPriceUsd": 40000,
       "previousSource": "mempool",
       "memo": "manual verification via block explorer",
-      "assertedAt": 1717200000
+      "assertedAt": 1717200000000
     }
   ],
   "prunedBranches": [
@@ -208,7 +208,7 @@
       "vout": 0,
       "amountSats": 15000000,
       "reason": "change output returned to sender",
-      "prunedAt": 1717200000
+      "prunedAt": 1717200000000
     }
   ],
   "settings": {

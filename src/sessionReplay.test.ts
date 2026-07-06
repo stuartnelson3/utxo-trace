@@ -9,10 +9,15 @@ import { TraceContext } from './TraceContext';
 import BasisReport from './components/BasisReport';
 import { DONATION_BTC_ADDRESS } from './config';
 
+// Note: BasisReport renders some timestamps via toLocaleString(), which
+// reads the process's system timezone. Determinism for that is handled in
+// vite.config.ts's test.env (TZ: 'UTC') — setting process.env.TZ from
+// inside a test file is too late; V8 caches the timezone at process start.
+
 // Freezes canonical serialization: if this ever fails, either the fixture
 // changed (expected — regenerate and update the pin) or canonicalization
 // itself changed (not expected — investigate before touching the pin).
-const PINNED_HASH = '1b44c3453ce2ecc0ec6156445d1162743d01e338ca754e583daa4ea94052abd3';
+const PINNED_HASH = '8a6f94a52a044d655f513b79f9759d4347c6fc777899946f56236df25e576622';
 
 describe('offline replay', () => {
   afterEach(() => {
