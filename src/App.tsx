@@ -5,6 +5,7 @@ import BasisReport from './components/BasisReport';
 import Legend from './components/Legend';
 import DataSourcesPanel from './components/DataSourcesPanel';
 import TipFooter from './components/TipFooter';
+import CsvUploadButton from './components/CsvUploadButton';
 import { UTXONode as UTXONodeType } from './core/types';
 import {
   fetchTx,
@@ -793,21 +794,11 @@ const App: React.FC = () => {
               style={{ display: 'none' }}
               onChange={(e) => handleCsvFiles(e.target.files)}
             />
-            <button
+            <CsvUploadButton
+              loading={csvLoading}
+              hasAnyAttribution={hasAnyAttribution}
               onClick={() => csvFileRef.current?.click()}
-              disabled={csvLoading}
-              title="uploading again replaces previously loaded kraken/swan files — select all files together to combine accounts"
-              style={{
-                font: '14px/1.7 monospace',
-                border: '1px solid var(--border)',
-                padding: '0 8px',
-                cursor: 'pointer',
-                background: hasAnyAttribution ? 'var(--fg)' : 'var(--bg)',
-                color: hasAnyAttribution ? 'var(--bg)' : 'var(--fg)',
-              }}
-            >
-              {csvLoading ? 'loading...' : hasAnyAttribution ? '[csv ✓]' : '[load exchange csv]'}
-            </button>
+            />
             {(krakenSummary || swanSummary) && !csvLoading && (
               <span style={{ color: 'var(--muted)', fontSize: 11 }}>
                 {[

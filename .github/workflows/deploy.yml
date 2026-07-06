@@ -25,9 +25,12 @@ jobs:
       - name: Verify dist CSP
         run: node scripts/check-dist-csp.mjs
       - name: Checksum dist
+        # Sorted so the manifest's line order is deterministic — otherwise a
+        # locally regenerated manifest could diff spuriously against this
+        # one on ordering alone, even with byte-identical file contents.
         run: |
           cd dist
-          find . -type f -exec sha256sum {} \; > ../dist-checksums.txt
+          find . -type f -exec sha256sum {} \; | sort -k2 > ../dist-checksums.txt
           cd ..
       - uses: actions/upload-artifact@v4
         with:

@@ -48,3 +48,36 @@ export const formatDate = (
   const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
   return dateFormatters[currency].format(d);
 };
+
+const dateTimeFormatters: Record<DisplayCurrency, Intl.DateTimeFormat> = {
+  USD: new Intl.DateTimeFormat(LOCALE_BY_CURRENCY.USD, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }),
+  EUR: new Intl.DateTimeFormat(LOCALE_BY_CURRENCY.EUR, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }),
+};
+
+// Explicit-locale date+time formatting — like formatDate, but with a time
+// component, for timestamps (override/prune assertions, report generation
+// stamp) that need more than a bare day. Never falls back to the system's
+// default locale (a bare toLocaleString()/toLocaleDateString() call): a
+// report shown in EUR mode must render de-DE-formatted timestamps
+// regardless of what locale the browser or CI runner happens to have.
+export const formatDateTime = (
+  date: Date | string | number,
+  currency: DisplayCurrency = APP_CONFIG.CURRENCY
+) => {
+  const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
+  return dateTimeFormatters[currency].format(d);
+};

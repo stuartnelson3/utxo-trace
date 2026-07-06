@@ -137,7 +137,7 @@ run's artifacts as `dist-checksums.txt`):
 
 ```bash
 npm run build
-(cd dist && find . -type f -exec sha256sum {} \;) > /tmp/local-checksums.txt
+(cd dist && find . -type f -exec sha256sum {} \; | sort -k2) > /tmp/local-checksums.txt
 diff /tmp/local-checksums.txt dist-checksums.txt
 ```
 

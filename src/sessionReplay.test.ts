@@ -9,10 +9,16 @@ import { TraceContext } from './TraceContext';
 import BasisReport from './components/BasisReport';
 import { DONATION_BTC_ADDRESS } from './config';
 
-// Note: BasisReport renders some timestamps via toLocaleString(), which
-// reads the process's system timezone. Determinism for that is handled in
-// vite.config.ts's test.env (TZ: 'UTC') — setting process.env.TZ from
-// inside a test file is too late; V8 caches the timezone at process start.
+// Note: BasisReport's date/time rendering now goes through config.ts's
+// explicit-locale formatDate/formatDateTime (fixed after a review caught
+// remaining bare toLocaleString()/toLocaleDateString() calls that ignored
+// the currency toggle and depended on the host's locale). What's left
+// depending on the environment is timezone: config.ts's Intl.DateTimeFormat
+// instances are built once at module-load time and keep whatever timezone
+// was active then, so determinism for that is handled in vite.config.ts's
+// test.env (TZ: 'UTC') — applied before the test process's modules start
+// executing, not by a process.env.TZ assignment in this file, which would
+// run after config.ts's formatters are already built.
 
 // Freezes canonical serialization: if this ever fails, either the fixture
 // changed (expected — regenerate and update the pin) or canonicalization

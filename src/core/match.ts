@@ -132,15 +132,18 @@ export function reconcileMatches(
     newLedger.filter((e) => e.type === 'withdrawal').map((e) => e.refid)
   );
   const kept = new Map<string, KrakenMatch>();
-  const droppedRefids: string[] = [];
+  const droppedRefidSet = new Set<string>();
   for (const [nodeId, match] of existing) {
     if (withdrawalRefids.has(match.refid)) {
       kept.set(nodeId, match);
     } else {
-      droppedRefids.push(match.refid);
+      droppedRefidSet.add(match.refid);
     }
   }
-  return { kept, droppedRefids };
+  // Deduped: two different nodeIds could in principle be matched to the
+  // same refid, and the warning message that lists these shouldn't repeat
+  // one refid twice just because two nodes happened to reference it.
+  return { kept, droppedRefids: [...droppedRefidSet] };
 }
 
 // For the zero-candidates UI hint: the closest unmatched withdrawal by

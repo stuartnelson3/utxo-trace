@@ -2,7 +2,7 @@ import React, { forwardRef } from 'react';
 import { UTXONode } from '../core/types';
 import { ScaledLeaf, nodePrice, leafBasis, findNode } from '../core/tree';
 import { isHeldOverOneYear } from '../core/holding';
-import { formatDate, formatCurrency } from '../config';
+import { formatDate, formatDateTime, formatCurrency } from '../config';
 import { useTraceContext } from '../TraceContext';
 import { krakenToLotRows } from '../core/kraken';
 import { swanToLotRows } from '../core/swan';
@@ -336,7 +336,9 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
                     <code style={{ color: '#555', wordBreak: 'break-all' }}>
                       {o.txid}:{o.vout}
                     </code>
-                    <span style={{ color: '#999' }}>{new Date(o.assertedAt).toLocaleString()}</span>
+                    <span style={{ color: '#999' }}>
+                      {formatDateTime(o.assertedAt, displayCurrency)}
+                    </span>
                   </div>
                   <div>
                     asserted: <strong>{fmtBoth(o.priceUsd, o.priceUsd * usdToEur)}</strong>/BTC —
@@ -380,7 +382,9 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
                       {p.txid}:{p.vout}
                     </code>
                     <span>{(p.amountSats / 1e8).toFixed(8)} BTC</span>
-                    <span style={{ color: '#999' }}>{new Date(p.prunedAt).toLocaleString()}</span>
+                    <span style={{ color: '#999' }}>
+                      {formatDateTime(p.prunedAt, displayCurrency)}
+                    </span>
                   </div>
                   <div style={{ color: '#555' }}>{p.reason}</div>
                 </div>
@@ -554,7 +558,7 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
             disposal amount.
           </div>
           <div style={{ fontSize: 10, color: '#999', flexShrink: 0 }}>
-            {new Date().toLocaleDateString()}
+            {formatDate(new Date(), displayCurrency)}
           </div>
         </div>
         <div style={{ marginTop: 12, fontSize: 9, color: '#999', lineHeight: 1.5 }}>

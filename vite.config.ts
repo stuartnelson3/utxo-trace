@@ -12,11 +12,14 @@ import pkg from './package.json';
 export default defineConfig(({ command }) => ({
   test: {
     environment: 'node',
-    // BasisReport renders some timestamps via toLocaleString(), which reads
-    // the process's system timezone. Pinning it here (applied before the
-    // test process's Date/Intl machinery initializes) makes snapshot tests
-    // deterministic regardless of which machine or CI runner executes them —
-    // setting process.env.TZ from inside a test file is too late for this.
+    // config.ts's Intl.DateTimeFormat instances are constructed once at
+    // module-load time and keep whatever timezone was active at that
+    // instant — a process.env.TZ assignment from inside a test file runs
+    // too late to affect formatters config.ts already built during import.
+    // Setting it here applies before the test process's modules even start
+    // executing, so every formatter is built under it from the start —
+    // needed so snapshot tests are deterministic regardless of which
+    // machine or CI runner executes them.
     env: {
       TZ: 'UTC',
     },
