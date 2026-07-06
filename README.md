@@ -146,3 +146,12 @@ mode instead.
 
 Not financial, tax, or legal advice. See [DISCLAIMER.md](DISCLAIMER.md) for
 the full statement, and [LICENSE](LICENSE) for terms (MIT).
+
+## Support
+
+If this tool saved you an afternoon with your tax advisor, tips are
+welcome — BTC only:
+
+```
+bc1quuszc94zvdlu628ev3hemymtk2nkwkv0xq6vuc
+```

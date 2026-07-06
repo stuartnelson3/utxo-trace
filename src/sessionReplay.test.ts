@@ -7,6 +7,7 @@ import { collectLeaves, collectExcluded, sumBasis } from './core/tree';
 import { loadSession, buildFullyExpandedTree } from './sessionReplay';
 import { TraceContext } from './TraceContext';
 import BasisReport from './components/BasisReport';
+import { DONATION_BTC_ADDRESS } from './config';
 
 // Freezes canonical serialization: if this ever fails, either the fixture
 // changed (expected — regenerate and update the pin) or canonicalization
@@ -96,6 +97,10 @@ describe('offline replay', () => {
     expect(html).toContain('traced inputs');
 
     expect(fetchSpy).not.toHaveBeenCalled();
+
+    // The audit report is a separate component tree from the app footer —
+    // a donation address on it would undercut the register (task 5).
+    expect(html).not.toContain(DONATION_BTC_ADDRESS);
 
     expect(html).toMatchSnapshot();
   });

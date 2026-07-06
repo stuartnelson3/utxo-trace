@@ -6,6 +6,11 @@ export const APP_CONFIG = {
   CURRENCY: 'EUR' as DisplayCurrency,
 };
 
+// Single source of truth for the tip address — every surface (README, app
+// footer) renders from this constant so a typo can only ever happen once,
+// and it's drift-guarded by config.test.ts against the README copy.
+export const DONATION_BTC_ADDRESS = 'bc1quuszc94zvdlu628ev3hemymtk2nkwkv0xq6vuc';
+
 // Locale travels with currency, never set independently — a USD report
 // with German-formatted dates (or vice versa) would be a real inconsistency,
 // not a style choice.

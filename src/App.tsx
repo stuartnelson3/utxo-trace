@@ -4,6 +4,7 @@ import UTXONode from './components/UTXONode';
 import BasisReport from './components/BasisReport';
 import Legend from './components/Legend';
 import DataSourcesPanel from './components/DataSourcesPanel';
+import TipFooter from './components/TipFooter';
 import { UTXONode as UTXONodeType } from './core/types';
 import {
   fetchTx,
@@ -32,7 +33,7 @@ import {
   OverrideRecord,
   PruneRecord,
 } from './core/tree';
-import { formatCurrency, APP_CONFIG, DisplayCurrency } from './config';
+import { formatCurrency, APP_CONFIG, DisplayCurrency, DONATION_BTC_ADDRESS } from './config';
 import { TraceContext } from './TraceContext';
 import {
   findMatchCandidates,
@@ -96,6 +97,13 @@ const App: React.FC = () => {
   // Set on import, cleared as soon as the user expands beyond cached data
   // (which triggers live fetches and changes the hash on next export).
   const [offlineReplayHash, setOfflineReplayHash] = useState<string | null>(null);
+
+  const [tipCopied, setTipCopied] = useState(false);
+  const handleCopyTipAddress = async () => {
+    await navigator.clipboard.writeText(DONATION_BTC_ADDRESS);
+    setTipCopied(true);
+    setTimeout(() => setTipCopied(false), 2000);
+  };
 
   // Kraken state — explicit user matching (candidates can be ambiguous, so
   // the user always confirms; matches are persisted by refid, not amount).
@@ -1153,6 +1161,7 @@ const App: React.FC = () => {
           app v{__APP_VERSION__} · commit {__COMMIT__}
           {bundleHash && ` · evidence bundle ${bundleHash.slice(0, 8)}`}
         </div>
+        <TipFooter copied={tipCopied} onCopy={handleCopyTipAddress} />
       </footer>
 
       {/* Hidden print target */}
