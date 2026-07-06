@@ -112,23 +112,19 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
     // Plain-language framing before any table or legal citation — the reader
     // (often a non-technical, older CPA/Steuerberater) should be able to get
     // the gist from one sentence before working through the supporting detail.
+    // Deliberately stops at the mechanical facts (amount, proceeds, basis,
+    // gain/loss) and says nothing about tax treatment: "exempt"/"taxable"
+    // depends on jurisdiction and residency this tool has no way to know,
+    // and that conclusion belongs only in the currency-aware, hedged rows
+    // below ("...see appendix") — not asserted flatly here.
     const btcAmount = (rootNode.amountSats / 1e8).toFixed(8);
-    const hasExempt = exemptBasis > 0;
-    const hasTaxable = taxableBasis > 0.005; // ignore float noise around a fully-exempt total
-    const holdingNote = hasExempt
-      ? hasTaxable
-        ? ' Part of the basis is tax-exempt (held over one year) and part is taxable (held one year or less) — see the >1y/<1y marks below.'
-        : ' The full basis is tax-exempt: every lot was held over one year.'
-      : hasTaxable
-        ? ' The full basis is taxable: no lot was held over one year.'
-        : '';
     const summarySentence = `In short: this report traces ${btcAmount} BTC ${
       disposalDate
         ? `disposed of on ${formatDate(new Date(disposalDate), displayCurrency)}`
         : "(using today's price — no disposal date is set yet)"
     } back to its purchase history. It was sold for ${fmt(proceeds)} against a cost basis of ${fmt(
       totalBasis
-    )}, a ${gainLoss >= 0 ? 'gain' : 'loss'} of ${fmt(Math.abs(gainLoss))}.${holdingNote}`;
+    )}, a ${gainLoss >= 0 ? 'gain' : 'loss'} of ${fmt(Math.abs(gainLoss))}.`;
 
     return (
       <div
