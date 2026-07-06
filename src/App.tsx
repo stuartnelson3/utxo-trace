@@ -813,7 +813,7 @@ const App: React.FC = () => {
             {/* Currency toggle — also selects the tax rule set, not just formatting */}
             <div
               style={{ display: 'flex', gap: 4 }}
-              title="also selects the tax rule set: EUR applies the German one-year holding exemption, USD applies US long/short-term capital gains (see the report's methodology appendix)"
+              title="also selects which jurisdiction's tax rule set applies — see the report's methodology appendix for the exact rule and citation"
             >
               {(['USD', 'EUR'] as DisplayCurrency[]).map((c) => (
                 <button

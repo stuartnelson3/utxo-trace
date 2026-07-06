@@ -2,7 +2,7 @@ import React, { forwardRef } from 'react';
 import { UTXONode } from '../core/types';
 import { ScaledLeaf, nodePrice, leafBasis, findNode } from '../core/tree';
 import { isHeldOverOneYear } from '../core/holding';
-import { formatDate, formatDateTime, formatCurrency } from '../config';
+import { formatDate, formatDateTime, formatCurrency, DisplayCurrency } from '../config';
 import { useTraceContext } from '../TraceContext';
 import { krakenToLotRows } from '../core/kraken';
 import { swanToLotRows } from '../core/swan';
@@ -45,6 +45,37 @@ const Row: React.FC<{
     <span style={{ color: muted ? 'var(--muted)' : 'inherit' }}>{value}</span>
   </div>
 );
+
+// Plain-language framing read before any table or legal citation — the
+// reader (often a non-technical, older CPA/Steuerberater) should get the
+// gist from one sentence before working through the supporting detail.
+// Pulled out as a pure function (rather than inlined in the render) so its
+// two branches — a real disposal vs. no disposal date recorded — can be
+// tested directly for the two failure modes already caught once each:
+// (1) asserting tax treatment ("exempt"/"taxable") that depends on
+// jurisdiction/residency this tool can't know, which belongs only in the
+// currency-aware, hedged rows below ("...see appendix"); (2) asserting a
+// completed sale ("was sold for...") when no disposal date is set, when
+// the number is actually a mark-to-market hypothetical.
+export function buildSummarySentence(input: {
+  btcAmount: string;
+  disposalDate: string | null;
+  proceeds: number;
+  totalBasis: number;
+  gainLoss: number;
+  displayCurrency: DisplayCurrency;
+}): string {
+  const { btcAmount, disposalDate, proceeds, totalBasis, gainLoss, displayCurrency } = input;
+  const fmt = (val: number) => formatCurrency(val, displayCurrency);
+  const disposalClause = disposalDate
+    ? `was sold on ${formatDate(new Date(disposalDate), displayCurrency)} for ${fmt(proceeds)}`
+    : `would be worth ${fmt(proceeds)} at today's price (no disposal date recorded yet)`;
+  return (
+    `In short: this report traces ${btcAmount} BTC that ${disposalClause}, against a cost basis ` +
+    `of ${fmt(totalBasis)} — a ${gainLoss >= 0 ? 'gain' : 'loss'} of ${fmt(Math.abs(gainLoss))}` +
+    `${disposalDate ? '' : ' if sold today'}.`
+  );
+}
 
 const BasisReport = forwardRef<HTMLDivElement, Props>(
   (
@@ -109,22 +140,15 @@ const BasisReport = forwardRef<HTMLDivElement, Props>(
 
     const overrides = [...overrideRecords.values()].sort((a, b) => a.assertedAt - b.assertedAt);
 
-    // Plain-language framing before any table or legal citation — the reader
-    // (often a non-technical, older CPA/Steuerberater) should be able to get
-    // the gist from one sentence before working through the supporting detail.
-    // Deliberately stops at the mechanical facts (amount, proceeds, basis,
-    // gain/loss) and says nothing about tax treatment: "exempt"/"taxable"
-    // depends on jurisdiction and residency this tool has no way to know,
-    // and that conclusion belongs only in the currency-aware, hedged rows
-    // below ("...see appendix") — not asserted flatly here.
     const btcAmount = (rootNode.amountSats / 1e8).toFixed(8);
-    const summarySentence = `In short: this report traces ${btcAmount} BTC ${
-      disposalDate
-        ? `disposed of on ${formatDate(new Date(disposalDate), displayCurrency)}`
-        : "(using today's price — no disposal date is set yet)"
-    } back to its purchase history. It was sold for ${fmt(proceeds)} against a cost basis of ${fmt(
-      totalBasis
-    )}, a ${gainLoss >= 0 ? 'gain' : 'loss'} of ${fmt(Math.abs(gainLoss))}.`;
+    const summarySentence = buildSummarySentence({
+      btcAmount,
+      disposalDate: disposalDate || null,
+      proceeds,
+      totalBasis,
+      gainLoss,
+      displayCurrency,
+    });
 
     return (
       <div
