@@ -796,6 +796,7 @@ const App: React.FC = () => {
             <button
               onClick={() => csvFileRef.current?.click()}
               disabled={csvLoading}
+              title="uploading again replaces previously loaded kraken/swan files — select all files together to combine accounts"
               style={{
                 font: '14px/1.7 monospace',
                 border: '1px solid var(--border)',
